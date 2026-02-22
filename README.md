@@ -1,4 +1,4 @@
-# Toddler 🎈
+# Fun Learning Toddler Games 🎈
 
 A simple, interactive web application designed specifically for toddlers.
 
