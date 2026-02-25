@@ -512,20 +512,8 @@ function ColorGame({
     }, 1500);
   }
 
-  // Color option button styling
-  const colorMap: Record<string, string> = {
-    Red: "bg-red-100 border-red-300 text-red-600 hover:bg-red-200",
-    Blue: "bg-blue-100 border-blue-300 text-blue-600 hover:bg-blue-200",
-    Green: "bg-green-100 border-green-300 text-green-700 hover:bg-green-200",
-    Yellow: "bg-yellow-100 border-yellow-300 text-yellow-600 hover:bg-yellow-200",
-    Purple: "bg-purple-100 border-purple-300 text-purple-600 hover:bg-purple-200",
-    Orange: "bg-orange-100 border-orange-300 text-orange-600 hover:bg-orange-200",
-    Pink: "bg-pink-100 border-pink-300 text-pink-600 hover:bg-pink-200",
-    Brown: "bg-amber-100 border-amber-400 text-amber-800 hover:bg-amber-200",
-    Black: "bg-gray-200 border-gray-500 text-gray-800 hover:bg-gray-300",
-    White: "bg-white border-gray-300 text-gray-500 hover:bg-gray-50",
-    Gray: "bg-gray-100 border-gray-300 text-gray-500 hover:bg-gray-200",
-  };
+  // Neutral button style for all options (so button color doesn't give away the answer)
+  const neutralBtnStyle = "bg-gradient-to-br from-purple-50 to-fuchsia-50 border-purple-300 text-purple-700 hover:from-purple-100 hover:to-fuchsia-100";
 
   return (
     <GameWrapper
@@ -559,7 +547,7 @@ function ColorGame({
         {/* Options */}
         <div className="space-y-3">
           {question.options.map((option) => {
-            let btnStyle = colorMap[option] || "bg-gray-100 border-gray-300 text-gray-600";
+            let btnStyle = neutralBtnStyle;
             if (selected) {
               if (option === question.colorName) {
                 btnStyle = "bg-green-100 border-green-400 text-green-700 scale-105";
@@ -741,22 +729,8 @@ function ShapeGame({
     }, 1500);
   }
 
-  // Shape-themed button colors
-  const shapeColorMap: Record<string, string> = {
-    Circle: "bg-blue-50 border-blue-300 text-blue-600 hover:bg-blue-100",
-    Square: "bg-red-50 border-red-300 text-red-600 hover:bg-red-100",
-    Triangle: "bg-green-50 border-green-300 text-green-600 hover:bg-green-100",
-    Star: "bg-yellow-50 border-yellow-300 text-yellow-600 hover:bg-yellow-100",
-    Heart: "bg-pink-50 border-pink-300 text-pink-600 hover:bg-pink-100",
-    Diamond: "bg-purple-50 border-purple-300 text-purple-600 hover:bg-purple-100",
-    Oval: "bg-orange-50 border-orange-300 text-orange-600 hover:bg-orange-100",
-    Rectangle: "bg-cyan-50 border-cyan-300 text-cyan-600 hover:bg-cyan-100",
-    Crescent: "bg-amber-50 border-amber-300 text-amber-600 hover:bg-amber-100",
-    Cross: "bg-red-50 border-red-300 text-red-600 hover:bg-red-100",
-    Arrow: "bg-emerald-50 border-emerald-300 text-emerald-600 hover:bg-emerald-100",
-    Hexagon: "bg-violet-50 border-violet-300 text-violet-600 hover:bg-violet-100",
-    Pentagon: "bg-indigo-50 border-indigo-300 text-indigo-600 hover:bg-indigo-100",
-  };
+  // Neutral button style for all options (so color doesn't give away the answer)
+  const neutralBtnStyle = "bg-gradient-to-br from-teal-50 to-emerald-50 border-teal-300 text-teal-700 hover:from-teal-100 hover:to-emerald-100";
 
   return (
     <GameWrapper
@@ -782,7 +756,7 @@ function ShapeGame({
         {/* Options */}
         <div className="space-y-3">
           {question.options.map((option) => {
-            let btnStyle = shapeColorMap[option] || "bg-gray-50 border-gray-300 text-gray-600 hover:bg-gray-100";
+            let btnStyle = neutralBtnStyle;
             if (selected) {
               if (option === question.shapeName) {
                 btnStyle = "bg-green-100 border-green-400 text-green-700 scale-105";
