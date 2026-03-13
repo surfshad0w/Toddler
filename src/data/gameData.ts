@@ -159,6 +159,121 @@ function generateMathOptions(correct: number): number[] {
   return shuffle(Array.from(opts));
 }
 
+// ============ PATTERN FUN ============
+export interface PatternQuestion {
+  pattern: string[];
+  answer: string;
+  options: string[];
+}
+
+export function generatePatternQuestions(): PatternQuestion[] {
+  const patternSets: { items: string[]; repeat: number }[] = [
+    { items: ["🔴", "🔵"], repeat: 2 },
+    { items: ["🌟", "🌙"], repeat: 2 },
+    { items: ["🍎", "🍌"], repeat: 2 },
+    { items: ["🐱", "🐶"], repeat: 2 },
+    { items: ["🌸", "🌻"], repeat: 2 },
+    { items: ["❤️", "💙"], repeat: 2 },
+    { items: ["🟢", "🟡"], repeat: 2 },
+    { items: ["🦋", "🐛"], repeat: 2 },
+    { items: ["🍕", "🍔"], repeat: 2 },
+    { items: ["🎈", "🎁"], repeat: 2 },
+    { items: ["🔴", "🔵", "🟢"], repeat: 1 },
+    { items: ["🍎", "🍊", "🍌"], repeat: 1 },
+    { items: ["⭐", "🌙", "☀️"], repeat: 1 },
+    { items: ["🐶", "🐱", "🐰"], repeat: 1 },
+    { items: ["❤️", "💛", "💙"], repeat: 1 },
+    { items: ["🌸", "🌼", "🌻"], repeat: 1 },
+  ];
+
+  const selected = shuffle(patternSets).slice(0, 12);
+  const questions: PatternQuestion[] = [];
+
+  for (const ps of selected) {
+    const fullPattern: string[] = [];
+    const totalRepeats = ps.items.length === 2 ? 3 : 2;
+    for (let r = 0; r < totalRepeats; r++) {
+      for (const item of ps.items) {
+        fullPattern.push(item);
+      }
+    }
+    // The answer is the last element, we show pattern without last
+    const answer = fullPattern[fullPattern.length - 1];
+    const shown = fullPattern.slice(0, fullPattern.length - 1);
+
+    // Generate wrong options from other emojis
+    const allEmojis = ["🔴", "🔵", "🟢", "🟡", "🍎", "🍌", "🍊", "🌟", "🌙", "☀️", "🐱", "🐶", "🐰", "🌸", "🌻", "🌼", "❤️", "💙", "💛", "🦋", "🐛", "🍕", "🍔", "🎈", "🎁"];
+    const wrongOptions = shuffle(allEmojis.filter((e) => e !== answer && !ps.items.includes(e))).slice(0, 2);
+    const options = shuffle([answer, ...wrongOptions]);
+
+    questions.push({ pattern: shown, answer, options });
+  }
+
+  return questions;
+}
+
+// ============ BIGGER OR SMALLER ============
+export interface CompareQuestion {
+  labelA: string;
+  valueA: number;
+  labelB: string;
+  valueB: number;
+  answer: ">" | "<" | "=";
+  type: "numbers" | "expression";
+}
+
+export function generateCompareQuestions(): CompareQuestion[] {
+  const questions: CompareQuestion[] = [];
+
+  // Type 1: Compare two plain numbers (2-digit, 10-99)
+  for (let i = 0; i < 5; i++) {
+    const a = Math.floor(Math.random() * 90) + 10; // 10-99
+    let b = Math.floor(Math.random() * 90) + 10;
+    // Sometimes make them equal
+    if (i === 3) b = a;
+    else while (b === a) b = Math.floor(Math.random() * 90) + 10;
+    const answer: ">" | "<" | "=" = a > b ? ">" : a < b ? "<" : "=";
+    questions.push({ labelA: `${a}`, valueA: a, labelB: `${b}`, valueB: b, answer, type: "numbers" });
+  }
+
+  // Type 2: Compare simple addition expressions
+  for (let i = 0; i < 4; i++) {
+    const a1 = Math.floor(Math.random() * 15) + 5; // 5-19
+    const a2 = Math.floor(Math.random() * 10) + 1; // 1-10
+    const b1 = Math.floor(Math.random() * 15) + 5;
+    const b2 = Math.floor(Math.random() * 10) + 1;
+    const sumA = a1 + a2;
+    const sumB = b1 + b2;
+    const answer: ">" | "<" | "=" = sumA > sumB ? ">" : sumA < sumB ? "<" : "=";
+    questions.push({
+      labelA: `${a1} + ${a2}`,
+      valueA: sumA,
+      labelB: `${b1} + ${b2}`,
+      valueB: sumB,
+      answer,
+      type: "expression",
+    });
+  }
+
+  // Type 3: Compare a number vs an expression
+  for (let i = 0; i < 3; i++) {
+    const plain = Math.floor(Math.random() * 20) + 5; // 5-24
+    const e1 = Math.floor(Math.random() * 15) + 3;
+    const e2 = Math.floor(Math.random() * 10) + 1;
+    const exprVal = e1 + e2;
+    const answer: ">" | "<" | "=" = plain > exprVal ? ">" : plain < exprVal ? "<" : "=";
+    // Randomly put number on left or right
+    if (Math.random() > 0.5) {
+      questions.push({ labelA: `${plain}`, valueA: plain, labelB: `${e1} + ${e2}`, valueB: exprVal, answer, type: "expression" });
+    } else {
+      const flipped: ">" | "<" | "=" = answer === ">" ? "<" : answer === "<" ? ">" : "=";
+      questions.push({ labelA: `${e1} + ${e2}`, valueA: exprVal, labelB: `${plain}`, valueB: plain, answer: flipped, type: "expression" });
+    }
+  }
+
+  return shuffle(questions);
+}
+
 // ============ HELPERS ============
 export function shuffle<T>(arr: T[]): T[] {
   const a = [...arr];
