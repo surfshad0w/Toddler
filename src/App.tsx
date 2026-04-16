@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
 import confetti from "canvas-confetti";
 import {
   findItQuestions,
@@ -18,7 +18,212 @@ import {
   type CompareQuestion,
 } from "./data/gameData";
 
-type GameMode = "menu" | "findit" | "counting" | "colors" | "shapes" | "math" | "pattern" | "compare" | "done";
+type Difficulty = "easy" | "medium" | "hard";
+type GameMode = "menu" | "findit" | "counting" | "colors" | "shapes" | "math" | "pattern" | "compare" | "phonics" | "done";
+
+type ProgressRecord = Record<GameMode, Record<Difficulty, number>>;
+type Achievement = {
+  id: string;
+  label: string;
+  emoji: string;
+  unlocked: boolean;
+};
+
+type PhonicsQuestion = {
+  prompt: string;
+  choices: { label: string; emoji: string }[];
+  answer: string;
+  hint: string;
+};
+
+const STORAGE_KEY = "toddler-site-progress-v2";
+const difficulties: Difficulty[] = ["easy", "medium", "hard"];
+const playableModes: GameMode[] = ["findit", "counting", "colors", "shapes", "math", "pattern", "compare", "phonics"];
+
+const difficultyLabels: Record<Difficulty, string> = {
+  easy: "Easy",
+  medium: "Medium",
+  hard: "Hard",
+};
+
+const difficultyDescriptions: Record<Difficulty, string> = {
+  easy: "Warm-up level",
+  medium: "A little trickier",
+  hard: "Challenge mode",
+};
+
+const modeEmoji: Record<GameMode, string> = {
+  menu: "🏠",
+  findit: "🔍",
+  counting: "🔢",
+  colors: "🎨",
+  shapes: "🔷",
+  math: "➕",
+  pattern: "🧩",
+  compare: "📏",
+  phonics: "📚",
+  done: "🎉",
+};
+
+const modeTitles: Record<GameMode, string> = {
+  menu: "Menu",
+  findit: "Find It!",
+  counting: "Counting Fun",
+  colors: "Color Quiz",
+  shapes: "Shape Match",
+  math: "Math Fun",
+  pattern: "Pattern Fun",
+  compare: "Compare Numbers",
+  phonics: "Phonics Fun",
+  done: "Done",
+};
+
+const phonicsQuestions: PhonicsQuestion[] = [
+  {
+    prompt: "Which word starts with B?",
+    answer: "Ball",
+    hint: "B says /b/ like ball.",
+    choices: [
+      { label: "Ball", emoji: "⚽" },
+      { label: "Sun", emoji: "☀️" },
+      { label: "Cat", emoji: "🐱" },
+    ],
+  },
+  {
+    prompt: "Which word starts with S?",
+    answer: "Sun",
+    hint: "S says /s/ like sun.",
+    choices: [
+      { label: "Dog", emoji: "🐶" },
+      { label: "Sun", emoji: "☀️" },
+      { label: "Fish", emoji: "🐟" },
+    ],
+  },
+  {
+    prompt: "Which word starts with M?",
+    answer: "Moon",
+    hint: "M says /m/ like moon.",
+    choices: [
+      { label: "Moon", emoji: "🌙" },
+      { label: "Tree", emoji: "🌲" },
+      { label: "Cake", emoji: "🎂" },
+    ],
+  },
+  {
+    prompt: "Which word starts with F?",
+    answer: "Fish",
+    hint: "F says /f/ like fish.",
+    choices: [
+      { label: "Car", emoji: "🚗" },
+      { label: "Fish", emoji: "🐟" },
+      { label: "Apple", emoji: "🍎" },
+    ],
+  },
+  {
+    prompt: "Which word starts with R?",
+    answer: "Rabbit",
+    hint: "R says /r/ like rabbit.",
+    choices: [
+      { label: "Rabbit", emoji: "🐰" },
+      { label: "Banana", emoji: "🍌" },
+      { label: "Heart", emoji: "❤️" },
+    ],
+  },
+  {
+    prompt: "Which word starts with T?",
+    answer: "Tree",
+    hint: "T says /t/ like tree.",
+    choices: [
+      { label: "Tree", emoji: "🌲" },
+      { label: "Balloon", emoji: "🎈" },
+      { label: "Dog", emoji: "🐶" },
+    ],
+  },
+  {
+    prompt: "Which word starts with C?",
+    answer: "Cat",
+    hint: "C says /k/ like cat.",
+    choices: [
+      { label: "Cat", emoji: "🐱" },
+      { label: "Moon", emoji: "🌙" },
+      { label: "Flower", emoji: "🌸" },
+    ],
+  },
+  {
+    prompt: "Which word starts with A?",
+    answer: "Apple",
+    hint: "A says /a/ like apple.",
+    choices: [
+      { label: "Apple", emoji: "🍎" },
+      { label: "Bird", emoji: "🐦" },
+      { label: "Pizza", emoji: "🍕" },
+    ],
+  },
+  {
+    prompt: "Which word rhymes with CAT?",
+    answer: "Hat",
+    hint: "Cat and hat have the same ending sound.",
+    choices: [
+      { label: "Hat", emoji: "🎩" },
+      { label: "Sun", emoji: "☀️" },
+      { label: "Dog", emoji: "🐶" },
+    ],
+  },
+  {
+    prompt: "Which word rhymes with DOG?",
+    answer: "Log",
+    hint: "Dog and log rhyme because they end the same way.",
+    choices: [
+      { label: "Fish", emoji: "🐟" },
+      { label: "Log", emoji: "🪵" },
+      { label: "Star", emoji: "⭐" },
+    ],
+  },
+  {
+    prompt: "Which word rhymes with SUN?",
+    answer: "Fun",
+    hint: "Sun and fun rhyme.",
+    choices: [
+      { label: "Fun", emoji: "🎉" },
+      { label: "Tree", emoji: "🌲" },
+      { label: "Cake", emoji: "🎂" },
+    ],
+  },
+  {
+    prompt: "Which word rhymes with FISH?",
+    answer: "Dish",
+    hint: "Fish and dish rhyme.",
+    choices: [
+      { label: "Dish", emoji: "🍽️" },
+      { label: "Moon", emoji: "🌙" },
+      { label: "Ball", emoji: "⚽" },
+    ],
+  },
+];
+
+function getDefaultProgress(): ProgressRecord {
+  const record = {} as ProgressRecord;
+  playableModes.forEach((mode) => {
+    record[mode] = { easy: 0, medium: 0, hard: 0 };
+  });
+  return record;
+}
+
+function getAchievementState(progress: ProgressRecord): Achievement[] {
+  const bestMath = Math.max(...difficulties.map((d) => progress.math[d] ?? 0));
+  const bestPattern = Math.max(...difficulties.map((d) => progress.pattern[d] ?? 0));
+  const bestCompare = Math.max(...difficulties.map((d) => progress.compare[d] ?? 0));
+  const bestPhonics = Math.max(...difficulties.map((d) => progress.phonics[d] ?? 0));
+  const masteredGames = playableModes.filter((mode) => Object.values(progress[mode]).some((score) => score >= 8)).length;
+
+  return [
+    { id: "math-star", label: "Math Star", emoji: "➕", unlocked: bestMath >= 6 },
+    { id: "pattern-detective", label: "Pattern Detective", emoji: "🧩", unlocked: bestPattern >= 6 },
+    { id: "compare-captain", label: "Compare Captain", emoji: "📏", unlocked: bestCompare >= 6 },
+    { id: "reading-rockstar", label: "Reading Rockstar", emoji: "📚", unlocked: bestPhonics >= 6 },
+    { id: "super-learner", label: "Super Learner", emoji: "🌟", unlocked: masteredGames >= 4 },
+  ];
+}
 
 function fireConfetti() {
   confetti({
@@ -35,183 +240,247 @@ function fireBigConfetti() {
   setTimeout(() => confetti({ particleCount: 150, spread: 100, origin: { y: 0.4, x: 0.7 } }), 600);
 }
 
-// ===== MAIN APP =====
+function getStarRating(score: number, total: number) {
+  if (score >= total) return 3;
+  if (score >= Math.ceil(total * 0.75)) return 2;
+  if (score >= Math.ceil(total * 0.4)) return 1;
+  return 0;
+}
+
+function getEncouragement(score: number, total: number) {
+  if (score === total) return "Perfect score, amazing work!";
+  if (score >= Math.ceil(total * 0.75)) return "Awesome job, you really know this!";
+  if (score >= Math.ceil(total * 0.4)) return "Nice work, keep going!";
+  return "Good try, let’s practice more!";
+}
+
+function getDifficultyMultiplier(difficulty: Difficulty) {
+  if (difficulty === "hard") return 3;
+  if (difficulty === "medium") return 2;
+  return 1;
+}
+
+function usePersistentProgress() {
+  const [progress, setProgress] = useState<ProgressRecord>(() => {
+    if (typeof window === "undefined") return getDefaultProgress();
+    try {
+      const raw = window.localStorage.getItem(STORAGE_KEY);
+      if (!raw) return getDefaultProgress();
+      return { ...getDefaultProgress(), ...JSON.parse(raw) };
+    } catch {
+      return getDefaultProgress();
+    }
+  });
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(progress));
+    } catch {
+      // ignore storage issues
+    }
+  }, [progress]);
+
+  return [progress, setProgress] as const;
+}
+
 export function App() {
   const [mode, setMode] = useState<GameMode>("menu");
-  const [totalScore, setTotalScore] = useState(0);
-  const [gamesPlayed, setGamesPlayed] = useState(0);
+  const [difficulty, setDifficulty] = useState<Difficulty>("medium");
+  const [lastGameScore, setLastGameScore] = useState(0);
+  const [lastGameTotal, setLastGameTotal] = useState(0);
+  const [progress, setProgress] = usePersistentProgress();
 
-  const handleGameComplete = useCallback((score: number) => {
-    setTotalScore((p) => p + score);
-    setGamesPlayed((p) => p + 1);
+  const achievements = useMemo(() => getAchievementState(progress), [progress]);
+  const totalScore = useMemo(() => playableModes.reduce((sum, game) => sum + Object.values(progress[game]).reduce((a, b) => a + b, 0), 0), [progress]);
+  const gamesPlayed = useMemo(() => playableModes.reduce((sum, game) => sum + difficulties.filter((d) => progress[game][d] > 0).length, 0), [progress]);
+
+  const handleGameComplete = useCallback((score: number, total: number) => {
+    setLastGameScore(score);
+    setLastGameTotal(total);
+    setProgress((prev) => {
+      if (!playableModes.includes(mode)) return prev;
+      const next = { ...prev, [mode]: { ...prev[mode] } };
+      next[mode][difficulty] = Math.max(prev[mode][difficulty], score);
+      return next;
+    });
     setMode("done");
     fireBigConfetti();
-  }, []);
+  }, [difficulty, mode, setProgress]);
 
   if (mode === "menu") {
-    return <MainMenu onSelect={setMode} totalScore={totalScore} gamesPlayed={gamesPlayed} />;
+    return (
+      <MainMenu
+        onSelect={setMode}
+        totalScore={totalScore}
+        gamesPlayed={gamesPlayed}
+        difficulty={difficulty}
+        onDifficultyChange={setDifficulty}
+        progress={progress}
+        achievements={achievements}
+      />
+    );
   }
   if (mode === "findit") {
-    return <FindItGame onComplete={handleGameComplete} onBack={() => setMode("menu")} />;
+    return <FindItGame difficulty={difficulty} onComplete={handleGameComplete} onBack={() => setMode("menu")} />;
   }
   if (mode === "counting") {
-    return <CountingGame onComplete={handleGameComplete} onBack={() => setMode("menu")} />;
+    return <CountingGame difficulty={difficulty} onComplete={handleGameComplete} onBack={() => setMode("menu")} />;
   }
   if (mode === "colors") {
-    return <ColorGame onComplete={handleGameComplete} onBack={() => setMode("menu")} />;
+    return <ColorGame difficulty={difficulty} onComplete={handleGameComplete} onBack={() => setMode("menu")} />;
   }
   if (mode === "shapes") {
-    return <ShapeGame onComplete={handleGameComplete} onBack={() => setMode("menu")} />;
+    return <ShapeGame difficulty={difficulty} onComplete={handleGameComplete} onBack={() => setMode("menu")} />;
   }
   if (mode === "math") {
-    return <MathGame onComplete={handleGameComplete} onBack={() => setMode("menu")} />;
+    return <MathGame difficulty={difficulty} onComplete={handleGameComplete} onBack={() => setMode("menu")} />;
   }
   if (mode === "pattern") {
-    return <PatternGame onComplete={handleGameComplete} onBack={() => setMode("menu")} />;
+    return <PatternGame difficulty={difficulty} onComplete={handleGameComplete} onBack={() => setMode("menu")} />;
   }
   if (mode === "compare") {
-    return <CompareGame onComplete={handleGameComplete} onBack={() => setMode("menu")} />;
+    return <CompareGame difficulty={difficulty} onComplete={handleGameComplete} onBack={() => setMode("menu")} />;
+  }
+  if (mode === "phonics") {
+    return <PhonicsGame difficulty={difficulty} onComplete={handleGameComplete} onBack={() => setMode("menu")} />;
   }
   if (mode === "done") {
-    return <DoneScreen onMenu={() => setMode("menu")} totalScore={totalScore} />;
+    return (
+      <DoneScreen
+        onMenu={() => setMode("menu")}
+        totalScore={totalScore}
+        lastGameScore={lastGameScore}
+        lastGameTotal={lastGameTotal}
+        difficulty={difficulty}
+      />
+    );
   }
   return null;
 }
 
-// ===== MAIN MENU =====
 function MainMenu({
   onSelect,
   totalScore,
   gamesPlayed,
+  difficulty,
+  onDifficultyChange,
+  progress,
+  achievements,
 }: {
   onSelect: (m: GameMode) => void;
   totalScore: number;
   gamesPlayed: number;
+  difficulty: Difficulty;
+  onDifficultyChange: (d: Difficulty) => void;
+  progress: ProgressRecord;
+  achievements: Achievement[];
 }) {
   const games = [
-    {
-      key: "findit" as GameMode,
-      emoji: "🔍",
-      title: "Find It!",
-      subtitle: "Tap the right emoji!",
-      gradient: "from-orange-400 to-pink-500",
-      bg: "bg-orange-50",
-    },
-    {
-      key: "counting" as GameMode,
-      emoji: "🔢",
-      title: "Counting Fun",
-      subtitle: "How many can you count?",
-      gradient: "from-blue-400 to-cyan-500",
-      bg: "bg-blue-50",
-    },
-    {
-      key: "colors" as GameMode,
-      emoji: "🎨",
-      title: "Color Quiz",
-      subtitle: "What color is this?",
-      gradient: "from-purple-400 to-pink-500",
-      bg: "bg-purple-50",
-    },
-    {
-      key: "shapes" as GameMode,
-      emoji: "🔷",
-      title: "Shape Match",
-      subtitle: "What shape is this?",
-      gradient: "from-teal-400 to-emerald-500",
-      bg: "bg-teal-50",
-    },
-    {
-      key: "math" as GameMode,
-      emoji: "➕",
-      title: "Math Fun",
-      subtitle: "Add & subtract!",
-      gradient: "from-rose-400 to-red-500",
-      bg: "bg-rose-50",
-    },
-    {
-      key: "pattern" as GameMode,
-      emoji: "🧩",
-      title: "Pattern Fun",
-      subtitle: "What comes next?",
-      gradient: "from-indigo-400 to-violet-500",
-      bg: "bg-indigo-50",
-    },
-    {
-      key: "compare" as GameMode,
-      emoji: "📏",
-      title: "Compare Numbers",
-      subtitle: "Greater, Less, or Equal?",
-      gradient: "from-amber-400 to-yellow-500",
-      bg: "bg-amber-50",
-    },
+    { key: "findit" as GameMode, emoji: "🔍", title: "Find It!", subtitle: "Vocabulary and picture matching", gradient: "from-orange-400 to-pink-500", bg: "bg-orange-50" },
+    { key: "counting" as GameMode, emoji: "🔢", title: "Counting Fun", subtitle: "Count, group, and make 10", gradient: "from-blue-400 to-cyan-500", bg: "bg-blue-50" },
+    { key: "colors" as GameMode, emoji: "🎨", title: "Color Quiz", subtitle: "Colors, shades, and shape clues", gradient: "from-purple-400 to-pink-500", bg: "bg-purple-50" },
+    { key: "shapes" as GameMode, emoji: "🔷", title: "Shape Match", subtitle: "Names, sides, and real-world clues", gradient: "from-teal-400 to-emerald-500", bg: "bg-teal-50" },
+    { key: "math" as GameMode, emoji: "➕", title: "Math Fun", subtitle: "Add, subtract, and fill in the blank", gradient: "from-rose-400 to-red-500", bg: "bg-rose-50" },
+    { key: "pattern" as GameMode, emoji: "🧩", title: "Pattern Fun", subtitle: "AB, AAB, ABC, and more", gradient: "from-indigo-400 to-violet-500", bg: "bg-indigo-50" },
+    { key: "compare" as GameMode, emoji: "📏", title: "Compare Numbers", subtitle: "Greater, less, equal, and ordering", gradient: "from-amber-400 to-yellow-500", bg: "bg-amber-50" },
+    { key: "phonics" as GameMode, emoji: "📚", title: "Phonics Fun", subtitle: "Beginning sounds and rhymes", gradient: "from-lime-400 to-green-500", bg: "bg-lime-50" },
   ];
 
   return (
     <div className="flex min-h-screen flex-col items-center justify-center bg-gradient-to-br from-yellow-100 via-pink-100 to-purple-200 px-4 py-8">
-      <div className="w-full max-w-md text-center">
-        {/* Title */}
+      <div className="w-full max-w-2xl text-center">
         <div className="mb-2 text-6xl animate-bounce">🌟</div>
-        <h1 className="mb-1 text-4xl font-extrabold text-purple-600">
-          Fun Learning!
-        </h1>
-        <p className="mb-6 text-lg text-purple-400 font-medium">
-          Pick a game to play!
-        </p>
+        <h1 className="mb-1 text-4xl font-extrabold text-purple-600">Fun Learning Adventure!</h1>
+        <p className="mb-6 text-lg font-medium text-purple-400">Choose a level, then pick a game to play.</p>
 
-        {/* Score badge */}
+        <div className="mb-6 rounded-3xl bg-white/80 p-4 shadow-lg backdrop-blur-sm">
+          <p className="mb-3 text-sm font-bold uppercase tracking-wide text-purple-400">Difficulty</p>
+          <div className="grid grid-cols-3 gap-3">
+            {difficulties.map((level) => (
+              <button
+                key={level}
+                onClick={() => onDifficultyChange(level)}
+                className={`rounded-2xl border-2 px-3 py-3 text-center transition-all ${difficulty === level ? "border-purple-500 bg-purple-100 text-purple-700 scale-[1.02]" : "border-white bg-white text-gray-500 hover:border-purple-200"}`}
+              >
+                <div className="text-lg font-extrabold">{difficultyLabels[level]}</div>
+                <div className="text-xs font-medium opacity-75">{difficultyDescriptions[level]}</div>
+              </button>
+            ))}
+          </div>
+        </div>
+
         {gamesPlayed > 0 && (
-          <div className="mx-auto mb-6 inline-flex items-center gap-2 rounded-full bg-white px-5 py-2 shadow-md">
+          <div className="mx-auto mb-6 inline-flex flex-wrap items-center justify-center gap-2 rounded-full bg-white px-5 py-2 shadow-md">
             <span className="text-2xl">⭐</span>
             <span className="text-xl font-bold text-amber-500">{totalScore} stars</span>
             <span className="text-gray-300">|</span>
-            <span className="text-lg font-bold text-purple-400">{gamesPlayed} games</span>
+            <span className="text-lg font-bold text-purple-400">{gamesPlayed} levels saved</span>
           </div>
         )}
 
-        {/* Game buttons */}
-        <div className="space-y-4">
-          {games.map((game) => (
-            <button
-              key={game.key}
-              onClick={() => onSelect(game.key)}
-              className={`w-full flex items-center gap-4 rounded-3xl ${game.bg} p-5 shadow-lg transition-all duration-200 hover:scale-[1.03] active:scale-[0.97] cursor-pointer border-2 border-white/60`}
-            >
-              <div
-                className={`flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br ${game.gradient} text-3xl shadow-md`}
+        <div className="mb-6 grid gap-4 md:grid-cols-2">
+          {games.map((game) => {
+            const best = progress[game.key][difficulty];
+            const stars = getStarRating(best, 8);
+            return (
+              <button
+                key={game.key}
+                onClick={() => onSelect(game.key)}
+                className={`w-full flex items-center gap-4 rounded-3xl ${game.bg} p-5 shadow-lg transition-all duration-200 hover:scale-[1.03] active:scale-[0.97] cursor-pointer border-2 border-white/60`}
               >
-                {game.emoji}
+                <div className={`flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br ${game.gradient} text-3xl shadow-md`}>
+                  {game.emoji}
+                </div>
+                <div className="min-w-0 flex-1 text-left">
+                  <h2 className="text-xl font-extrabold text-gray-700">{game.title}</h2>
+                  <p className="text-sm font-medium text-gray-400">{game.subtitle}</p>
+                  <p className="mt-1 text-xs font-bold text-purple-400">Best on {difficultyLabels[difficulty]}: {best}/8</p>
+                </div>
+                <div className="text-right">
+                  <div className="text-lg">{"⭐".repeat(stars)}{stars === 0 ? "☆" : ""}</div>
+                  <div className="text-2xl text-gray-300">▶</div>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="rounded-3xl bg-white/85 p-5 text-left shadow-lg backdrop-blur-sm">
+          <h2 className="mb-3 text-lg font-extrabold text-purple-600">Badges Earned</h2>
+          <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-3">
+            {achievements.map((achievement) => (
+              <div
+                key={achievement.id}
+                className={`rounded-2xl border px-4 py-3 ${achievement.unlocked ? "border-yellow-300 bg-yellow-50 text-amber-700" : "border-gray-200 bg-gray-50 text-gray-400"}`}
+              >
+                <div className="text-2xl">{achievement.unlocked ? achievement.emoji : "🔒"}</div>
+                <div className="font-extrabold">{achievement.label}</div>
+                <div className="text-xs font-medium">{achievement.unlocked ? "Unlocked!" : "Keep playing to earn this"}</div>
               </div>
-              <div className="text-left">
-                <h2 className="text-xl font-extrabold text-gray-700">
-                  {game.title}
-                </h2>
-                <p className="text-sm font-medium text-gray-400">
-                  {game.subtitle}
-                </p>
-              </div>
-              <div className="ml-auto text-3xl text-gray-300">▶</div>
-            </button>
-          ))}
+            ))}
+          </div>
         </div>
       </div>
     </div>
   );
 }
 
-// ===== DONE SCREEN =====
-function DoneScreen({ onMenu, totalScore }: { onMenu: () => void; totalScore: number }) {
+function DoneScreen({ onMenu, totalScore, lastGameScore, lastGameTotal, difficulty }: { onMenu: () => void; totalScore: number; lastGameScore: number; lastGameTotal: number; difficulty: Difficulty }) {
+  const stars = getStarRating(lastGameScore, lastGameTotal || 1);
   return (
     <div className="flex min-h-screen flex-col items-center justify-center bg-gradient-to-br from-yellow-100 via-pink-100 to-purple-200 px-4">
       <div className="w-full max-w-md rounded-3xl bg-white p-8 text-center shadow-2xl">
         <div className="mb-4 text-7xl animate-bounce">🎉</div>
-        <h1 className="mb-2 text-4xl font-extrabold text-purple-600">
-          Awesome Job!
-        </h1>
-        <p className="mb-6 text-xl text-gray-500">You finished the game!</p>
+        <h1 className="mb-2 text-4xl font-extrabold text-purple-600">Awesome Job!</h1>
+        <p className="mb-3 text-xl text-gray-500">{difficultyLabels[difficulty]} level complete</p>
         <div className="mb-6 rounded-2xl bg-gradient-to-r from-yellow-50 to-amber-50 p-5">
+          <div className="mb-2 text-4xl">{"⭐".repeat(Math.max(stars, 1))}</div>
+          <p className="text-2xl font-bold text-amber-600">{lastGameScore} / {lastGameTotal} this round</p>
+          <p className="mt-2 text-sm font-semibold text-amber-500">{getEncouragement(lastGameScore, lastGameTotal)}</p>
+        </div>
+        <div className="mb-6 rounded-2xl bg-gradient-to-r from-purple-50 to-pink-50 p-5">
           <div className="mb-1 text-4xl">{"⭐".repeat(Math.min(totalScore, 20))}</div>
-          <p className="text-2xl font-bold text-amber-600">{totalScore} Total Stars!</p>
+          <p className="text-2xl font-bold text-purple-600">{totalScore} Total Stars!</p>
         </div>
         <button
           onClick={onMenu}
@@ -224,7 +493,6 @@ function DoneScreen({ onMenu, totalScore }: { onMenu: () => void; totalScore: nu
   );
 }
 
-// ===== GAME WRAPPER (shared layout) =====
 function GameWrapper({
   title,
   emoji,
@@ -233,6 +501,7 @@ function GameWrapper({
   score,
   onBack,
   bgGradient,
+  difficulty,
   children,
 }: {
   title: string;
@@ -242,64 +511,48 @@ function GameWrapper({
   score: number;
   onBack: () => void;
   bgGradient: string;
+  difficulty: Difficulty;
   children: React.ReactNode;
 }) {
-  const progress = (current / total) * 100;
+  const progress = ((current + 1) / total) * 100;
 
   return (
     <div className={`flex min-h-screen flex-col items-center ${bgGradient} px-4 py-6`}>
-      {/* Header */}
       <div className="mb-4 w-full max-w-md">
-        <div className="flex items-center justify-between">
+        <div className="mb-2 flex items-center justify-between">
           <button
             onClick={onBack}
             className="flex h-10 w-10 items-center justify-center rounded-full bg-white/80 text-xl shadow-md transition-transform hover:scale-110 active:scale-95 cursor-pointer"
           >
             ←
           </button>
-          <h1 className="text-xl font-extrabold text-purple-600 sm:text-2xl">
-            {emoji} {title}
-          </h1>
+          <h1 className="text-center text-xl font-extrabold text-purple-600 sm:text-2xl">{emoji} {title}</h1>
           <div className="flex items-center gap-1 rounded-full bg-white px-3 py-1.5 shadow-md">
             <span className="text-lg">⭐</span>
             <span className="text-lg font-bold text-amber-500">{score}</span>
           </div>
         </div>
-        {/* Progress */}
+        <div className="mb-2 text-center text-sm font-bold uppercase tracking-wide text-purple-400">{difficultyLabels[difficulty]} Mode</div>
         <div className="mt-3 h-4 w-full overflow-hidden rounded-full bg-white/60 shadow-inner">
-          <div
-            className="h-full rounded-full bg-gradient-to-r from-green-400 to-emerald-500 transition-all duration-500"
-            style={{ width: `${progress}%` }}
-          />
+          <div className="h-full rounded-full bg-gradient-to-r from-green-400 to-emerald-500 transition-all duration-500" style={{ width: `${progress}%` }} />
         </div>
-        <p className="mt-1 text-center text-sm font-semibold text-purple-400">
-          {current} / {total}
-        </p>
+        <p className="mt-1 text-center text-sm font-semibold text-purple-400">{current + 1} / {total}</p>
       </div>
-
-      {/* Content */}
-      <div className="w-full max-w-md flex-1 flex items-start justify-center">
-        {children}
-      </div>
+      <div className="flex w-full max-w-md flex-1 items-start justify-center">{children}</div>
     </div>
   );
 }
 
-// ===== FIND IT GAME =====
-function FindItGame({
-  onComplete,
-  onBack,
-}: {
-  onComplete: (score: number) => void;
-  onBack: () => void;
-}) {
-  const TOTAL = 8;
-  const [questions] = useState<FindItQuestion[]>(() =>
-    shuffle(findItQuestions).slice(0, TOTAL).map((q) => ({
-      ...q,
-      options: shuffle(q.options),
-    }))
-  );
+function buildFindItQuestions(difficulty: Difficulty): FindItQuestion[] {
+  const base = shuffle(findItQuestions).map((q) => ({ ...q, options: shuffle(q.options) }));
+  if (difficulty === "easy") return base.slice(0, 8);
+  if (difficulty === "medium") return base.slice(0, 10);
+  return base.map((q) => ({ ...q, word: `Find something that starts with ${q.word[0]}... ${q.word}` })).slice(0, 10);
+}
+
+function FindItGame({ onComplete, onBack, difficulty }: { onComplete: (score: number, total: number) => void; onBack: () => void; difficulty: Difficulty }) {
+  const TOTAL = difficulty === "easy" ? 8 : 10;
+  const [questions] = useState<FindItQuestion[]>(() => buildFindItQuestions(difficulty).slice(0, TOTAL));
   const [current, setCurrent] = useState(0);
   const [score, setScore] = useState(0);
   const [selected, setSelected] = useState<string | null>(null);
@@ -317,72 +570,42 @@ function FindItGame({
       fireConfetti();
     }
     setTimeout(() => {
-      if (current + 1 >= TOTAL) {
-        onComplete(score + (correct ? 1 : 0));
-      } else {
+      if (current + 1 >= TOTAL) onComplete(score + (correct ? 1 : 0), TOTAL);
+      else {
         setCurrent((c) => c + 1);
         setSelected(null);
         setIsCorrect(null);
       }
-    }, 1500);
+    }, 1400);
   }
 
   return (
-    <GameWrapper
-      title="Find It!"
-      emoji="🔍"
-      current={current}
-      total={TOTAL}
-      score={score}
-      onBack={onBack}
-      bgGradient="bg-gradient-to-br from-orange-50 via-pink-50 to-yellow-100"
-    >
+    <GameWrapper title="Find It!" emoji="🔍" current={current} total={TOTAL} score={score} onBack={onBack} bgGradient="bg-gradient-to-br from-orange-50 via-pink-50 to-yellow-100" difficulty={difficulty}>
       <div className="w-full rounded-3xl bg-white p-6 shadow-2xl sm:p-8">
-        {/* Word prompt */}
         <div className="mb-3 text-center">
-          <p className="text-xl font-bold text-gray-400 mb-1">Find the...</p>
-          <h2 className="text-5xl sm:text-6xl font-extrabold text-orange-500 animate-[popIn_0.4s_ease-out]">
-            {question.word}
-          </h2>
+          <p className="mb-1 text-xl font-bold text-gray-400">Find the...</p>
+          <h2 className="text-4xl font-extrabold text-orange-500 sm:text-5xl">{question.word}</h2>
         </div>
-
-        {/* Question */}
-        <p className="mb-6 text-center text-xl font-bold text-gray-500">
-          Tap the right emoji! 👇
-        </p>
-
-        {/* Emoji options — big buttons */}
+        <p className="mb-3 text-center text-base font-bold text-gray-500">Tap the picture that matches. 👇</p>
         <div className="flex justify-center gap-4 sm:gap-6">
           {question.options.map((option) => {
             let btnStyle = "bg-gradient-to-br from-amber-50 to-orange-50 border-orange-200 hover:from-amber-100 hover:to-orange-100 hover:scale-110";
             if (selected) {
-              if (option === question.correctEmoji) {
-                btnStyle = "bg-gradient-to-br from-green-100 to-emerald-200 border-green-400 scale-110 ring-4 ring-green-300";
-              } else if (option === selected && !isCorrect) {
-                btnStyle = "bg-gradient-to-br from-red-100 to-pink-100 border-red-300 animate-[shake_0.4s_ease-in-out] opacity-60";
-              } else {
-                btnStyle = "bg-gray-50 border-gray-200 opacity-40";
-              }
+              if (option === question.correctEmoji) btnStyle = "bg-gradient-to-br from-green-100 to-emerald-200 border-green-400 scale-110 ring-4 ring-green-300";
+              else if (option === selected && !isCorrect) btnStyle = "bg-gradient-to-br from-red-100 to-pink-100 border-red-300 animate-[shake_0.4s_ease-in-out] opacity-60";
+              else btnStyle = "bg-gray-50 border-gray-200 opacity-40";
             }
             return (
-              <button
-                key={option}
-                onClick={() => handleSelect(option)}
-                disabled={!!selected}
-                className={`flex h-24 w-24 sm:h-28 sm:w-28 items-center justify-center rounded-3xl border-4 text-5xl sm:text-6xl transition-all duration-200 cursor-pointer ${btnStyle}`}
-              >
+              <button key={option} onClick={() => handleSelect(option)} disabled={!!selected} className={`flex h-24 w-24 items-center justify-center rounded-3xl border-4 text-5xl transition-all duration-200 cursor-pointer sm:h-28 sm:w-28 sm:text-6xl ${btnStyle}`}>
                 {option}
               </button>
             );
           })}
         </div>
-
-        {/* Feedback */}
         {selected && (
-          <div className="mt-5 text-center animate-[popIn_0.3s_ease-out]">
-            <p className={`text-2xl font-extrabold ${isCorrect ? "text-green-500" : "text-orange-400"}`}>
-              {isCorrect ? "🎉 Great job!" : `It's this one: ${question.correctEmoji}`}
-            </p>
+          <div className="mt-5 text-center">
+            <p className={`text-2xl font-extrabold ${isCorrect ? "text-green-500" : "text-orange-400"}`}>{isCorrect ? "🎉 Great job!" : `Try again next time, it was ${question.correctEmoji}`}</p>
+            <p className="mt-1 text-sm font-semibold text-gray-400">{difficulty === "hard" ? `Hint: ${question.word[question.word.length - 1] ? `listen for the first sound in ${question.word.replace("Find something that starts with ", "")}` : ""}` : "Picture words help us read!"}</p>
           </div>
         )}
       </div>
@@ -390,45 +613,56 @@ function FindItGame({
   );
 }
 
-// ===== COUNTING GAME =====
-function CountingGame({
-  onComplete,
-  onBack,
-}: {
-  onComplete: (score: number) => void;
-  onBack: () => void;
-}) {
+function buildCountingQuestions(difficulty: Difficulty) {
+  const questions = generateCountingQuestions();
+  return questions.map((q, index) => {
+    if (difficulty === "easy") {
+      const count = Math.min(q.count, 5);
+      return { ...q, count, options: shuffle([count, Math.max(1, count - 1), Math.min(10, count + 1)]) };
+    }
+    if (difficulty === "medium") {
+      return q;
+    }
+    if (index % 2 === 0) {
+      const count = Math.min(q.count + 2, 10);
+      return { ...q, count, options: shuffle([count, Math.max(1, count - 2), Math.min(10, count + 1)]) };
+    }
+    const answer = 10 - q.count;
+    return {
+      ...q,
+      count: q.count,
+      target: 10,
+      questionType: "make10" as const,
+      options: shuffle([answer, Math.max(1, answer - 1), Math.min(10, answer + 2)]),
+    };
+  });
+}
+
+function CountingGame({ onComplete, onBack, difficulty }: { onComplete: (score: number, total: number) => void; onBack: () => void; difficulty: Difficulty }) {
   const TOTAL = 8;
-  const [questions] = useState<CountingQuestion[]>(() =>
-    generateCountingQuestions().slice(0, TOTAL)
-  );
+  const [questions] = useState<any[]>(() => buildCountingQuestions(difficulty).slice(0, TOTAL));
   const [current, setCurrent] = useState(0);
   const [score, setScore] = useState(0);
   const [selected, setSelected] = useState<number | null>(null);
   const [isCorrect, setIsCorrect] = useState<boolean | null>(null);
-
   const question = questions[current];
-
-  // Build the emoji display
+  const expectedAnswer = question.questionType === "make10" ? 10 - question.count : question.count;
   const emojiDisplay = Array.from({ length: question.count }, (_, i) => (
-    <span key={i} className="text-4xl sm:text-5xl mx-1 inline-block animate-[popIn_0.3s_ease-out]" style={{ animationDelay: `${i * 0.08}s`, animationFillMode: "both" }}>
-      {question.emoji}
-    </span>
+    <span key={i} className="mx-1 inline-block text-4xl sm:text-5xl" style={{ animationDelay: `${i * 0.08}s`, animationFillMode: "both" }}>{question.emoji}</span>
   ));
 
   function handleSelect(option: number) {
     if (selected !== null) return;
     setSelected(option);
-    const correct = option === question.count;
+    const correct = option === expectedAnswer;
     setIsCorrect(correct);
     if (correct) {
       setScore((s) => s + 1);
       fireConfetti();
     }
     setTimeout(() => {
-      if (current + 1 >= TOTAL) {
-        onComplete(score + (correct ? 1 : 0));
-      } else {
+      if (current + 1 >= TOTAL) onComplete(score + (correct ? 1 : 0), TOTAL);
+      else {
         setCurrent((c) => c + 1);
         setSelected(null);
         setIsCorrect(null);
@@ -437,85 +671,37 @@ function CountingGame({
   }
 
   return (
-    <GameWrapper
-      title="Counting Fun"
-      emoji="🔢"
-      current={current}
-      total={TOTAL}
-      score={score}
-      onBack={onBack}
-      bgGradient="bg-gradient-to-br from-blue-50 via-cyan-50 to-sky-100"
-    >
+    <GameWrapper title="Counting Fun" emoji="🔢" current={current} total={TOTAL} score={score} onBack={onBack} bgGradient="bg-gradient-to-br from-blue-50 via-cyan-50 to-sky-100" difficulty={difficulty}>
       <div className="w-full rounded-3xl bg-white p-6 shadow-2xl sm:p-8">
-        {/* Emoji grid */}
-        <div className="mb-4 flex flex-wrap items-center justify-center gap-2 rounded-2xl bg-blue-50 p-6 min-h-[120px]">
-          {emojiDisplay}
-        </div>
-
-        {/* Question */}
-        <h2 className="mb-6 text-center text-2xl font-extrabold text-gray-700 sm:text-3xl">
-          How many <span className="text-blue-500">{question.emoji}</span> do you see?
+        <div className="mb-4 flex min-h-[120px] flex-wrap items-center justify-center gap-2 rounded-2xl bg-blue-50 p-6">{emojiDisplay}</div>
+        <h2 className="mb-2 text-center text-2xl font-extrabold text-gray-700 sm:text-3xl">
+          {question.questionType === "make10" ? `How many more ${question.emoji} to make 10?` : `How many ${question.emoji} do you see?`}
         </h2>
-
-        {/* Options */}
+        <p className="mb-6 text-center text-sm font-semibold text-blue-400">{question.questionType === "make10" ? "Count on to 10." : difficulty === "hard" ? "Count carefully, some are trickier now." : "Count each one."}</p>
         <div className="flex justify-center gap-4">
-          {question.options.map((option) => {
+          {question.options.map((option: number) => {
             let btnStyle = "bg-gradient-to-br from-blue-100 to-cyan-100 border-blue-300 text-blue-700 hover:from-blue-200 hover:to-cyan-200";
             if (selected !== null) {
-              if (option === question.count) {
-                btnStyle = "bg-gradient-to-br from-green-100 to-emerald-200 border-green-400 text-green-700 scale-110";
-              } else if (option === selected && !isCorrect) {
-                btnStyle = "bg-gradient-to-br from-red-100 to-pink-100 border-red-300 text-red-500 animate-[shake_0.4s_ease-in-out]";
-              } else {
-                btnStyle = "bg-gray-100 border-gray-200 text-gray-400";
-              }
+              if (option === expectedAnswer) btnStyle = "bg-gradient-to-br from-green-100 to-emerald-200 border-green-400 text-green-700 scale-110";
+              else if (option === selected && !isCorrect) btnStyle = "bg-gradient-to-br from-red-100 to-pink-100 border-red-300 text-red-500 animate-[shake_0.4s_ease-in-out]";
+              else btnStyle = "bg-gray-100 border-gray-200 text-gray-400";
             }
-            return (
-              <button
-                key={option}
-                onClick={() => handleSelect(option)}
-                disabled={selected !== null}
-                className={`flex h-20 w-20 sm:h-24 sm:w-24 items-center justify-center rounded-2xl border-4 text-4xl sm:text-5xl font-extrabold transition-all duration-200 cursor-pointer ${btnStyle}`}
-              >
-                {option}
-              </button>
-            );
+            return <button key={option} onClick={() => handleSelect(option)} disabled={selected !== null} className={`flex h-20 w-20 items-center justify-center rounded-2xl border-4 text-4xl font-extrabold transition-all duration-200 cursor-pointer sm:h-24 sm:w-24 sm:text-5xl ${btnStyle}`}>{option}</button>;
           })}
         </div>
-
-        {/* Feedback */}
-        {selected !== null && (
-          <div className="mt-5 text-center animate-[popIn_0.3s_ease-out]">
-            <p className={`text-2xl font-extrabold ${isCorrect ? "text-green-500" : "text-blue-400"}`}>
-              {isCorrect ? "🎉 Correct!" : `There are ${question.count}!`}
-            </p>
-          </div>
-        )}
+        {selected !== null && <div className="mt-5 text-center"><p className={`text-2xl font-extrabold ${isCorrect ? "text-green-500" : "text-blue-400"}`}>{isCorrect ? "🎉 Correct!" : question.questionType === "make10" ? `${question.count} and ${expectedAnswer} make 10.` : `There are ${expectedAnswer}!`}</p></div>}
       </div>
     </GameWrapper>
   );
 }
 
-// ===== COLOR GAME =====
-function ColorGame({
-  onComplete,
-  onBack,
-}: {
-  onComplete: (score: number) => void;
-  onBack: () => void;
-}) {
+function ColorGame({ onComplete, onBack, difficulty }: { onComplete: (score: number, total: number) => void; onBack: () => void; difficulty: Difficulty }) {
   const TOTAL = 8;
-  const [questions] = useState<ColorQuestion[]>(() =>
-    shuffle(colorQuestions).slice(0, TOTAL).map(q => ({
-      ...q,
-      options: shuffle(q.options),
-    }))
-  );
+  const [questions] = useState<ColorQuestion[]>(() => shuffle(colorQuestions).slice(0, TOTAL).map((q) => ({ ...q, options: shuffle(q.options) })));
   const [current, setCurrent] = useState(0);
   const [score, setScore] = useState(0);
   const [selected, setSelected] = useState<string | null>(null);
   const [isCorrect, setIsCorrect] = useState<boolean | null>(null);
-
   const question = questions[current];
 
   function handleSelect(option: string) {
@@ -528,9 +714,8 @@ function ColorGame({
       fireConfetti();
     }
     setTimeout(() => {
-      if (current + 1 >= TOTAL) {
-        onComplete(score + (correct ? 1 : 0));
-      } else {
+      if (current + 1 >= TOTAL) onComplete(score + (correct ? 1 : 0), TOTAL);
+      else {
         setCurrent((c) => c + 1);
         setSelected(null);
         setIsCorrect(null);
@@ -538,202 +723,64 @@ function ColorGame({
     }, 1500);
   }
 
-  // Neutral button style for all options (so button color doesn't give away the answer)
-  const neutralBtnStyle = "bg-gradient-to-br from-purple-50 to-fuchsia-50 border-purple-300 text-purple-700 hover:from-purple-100 hover:to-fuchsia-100";
-
   return (
-    <GameWrapper
-      title="Color Quiz"
-      emoji="🎨"
-      current={current}
-      total={TOTAL}
-      score={score}
-      onBack={onBack}
-      bgGradient="bg-gradient-to-br from-purple-50 via-pink-50 to-fuchsia-100"
-    >
+    <GameWrapper title="Color Quiz" emoji="🎨" current={current} total={TOTAL} score={score} onBack={onBack} bgGradient="bg-gradient-to-br from-purple-50 via-pink-50 to-fuchsia-100" difficulty={difficulty}>
       <div className="w-full rounded-3xl bg-white p-6 shadow-2xl sm:p-8">
-        {/* Colored shape */}
         <div className="mb-4 flex justify-center">
-          <div
-            className="text-[130px] leading-none sm:text-[160px] animate-[popIn_0.4s_ease-out]"
-            style={{
-              color: question.colorHex,
-              textShadow: question.colorName === "White" ? "0 0 10px rgba(0,0,0,0.1)" : "none",
-            }}
-          >
-            {question.shape}
-          </div>
+          <div className="text-[130px] leading-none sm:text-[160px]" style={{ color: question.colorHex, textShadow: question.colorName === "White" ? "0 0 10px rgba(0,0,0,0.1)" : "none" }}>{question.shape}</div>
         </div>
-
-        {/* Question */}
-        <h2 className="mb-6 text-center text-2xl font-extrabold text-gray-700 sm:text-3xl">
-          What color is this?
-        </h2>
-
-        {/* Options */}
+        <h2 className="mb-2 text-center text-2xl font-extrabold text-gray-700 sm:text-3xl">{difficulty === "hard" ? "Which color name matches this shape?" : "What color is this?"}</h2>
+        <p className="mb-6 text-center text-sm font-semibold text-purple-400">{difficulty === "hard" ? "Use the color word, not the shape clue." : "Look carefully at the color."}</p>
         <div className="space-y-3">
           {question.options.map((option) => {
-            let btnStyle = neutralBtnStyle;
+            let btnStyle = "bg-gradient-to-br from-purple-50 to-fuchsia-50 border-purple-300 text-purple-700 hover:from-purple-100 hover:to-fuchsia-100";
             if (selected) {
-              if (option === question.colorName) {
-                btnStyle = "bg-green-100 border-green-400 text-green-700 scale-105";
-              } else if (option === selected && !isCorrect) {
-                btnStyle = "bg-red-100 border-red-300 text-red-500 animate-[shake_0.4s_ease-in-out]";
-              } else {
-                btnStyle = "bg-gray-50 border-gray-200 text-gray-400";
-              }
+              if (option === question.colorName) btnStyle = "bg-green-100 border-green-400 text-green-700 scale-105";
+              else if (option === selected && !isCorrect) btnStyle = "bg-red-100 border-red-300 text-red-500 animate-[shake_0.4s_ease-in-out]";
+              else btnStyle = "bg-gray-50 border-gray-200 text-gray-400";
             }
-            return (
-              <button
-                key={option}
-                onClick={() => handleSelect(option)}
-                disabled={!!selected}
-                className={`w-full rounded-2xl border-3 p-4 text-2xl font-extrabold transition-all duration-200 cursor-pointer sm:text-3xl ${btnStyle}`}
-              >
-                {option === question.colorName && selected
-                  ? `${option} ✅`
-                  : option === selected && !isCorrect
-                    ? `${option} ❌`
-                    : option}
-              </button>
-            );
+            return <button key={option} onClick={() => handleSelect(option)} disabled={!!selected} className={`w-full rounded-2xl border-2 p-4 text-2xl font-extrabold transition-all duration-200 cursor-pointer sm:text-3xl ${btnStyle}`}>{option}</button>;
           })}
         </div>
-
-        {/* Feedback */}
-        {selected && (
-          <div className="mt-4 text-center animate-[popIn_0.3s_ease-out]">
-            <p className={`text-2xl font-extrabold ${isCorrect ? "text-green-500" : "text-purple-400"}`}>
-              {isCorrect ? "🎉 Correct!" : `It's ${question.colorName}!`}
-            </p>
-          </div>
-        )}
+        {selected && <div className="mt-4 text-center"><p className={`text-2xl font-extrabold ${isCorrect ? "text-green-500" : "text-purple-400"}`}>{isCorrect ? "🎉 Correct!" : `It’s ${question.colorName}!`}</p><p className="mt-1 text-sm font-semibold text-purple-300">{difficulty === "hard" ? `${question.colorName} is the color word.` : "You matched the color correctly."}</p></div>}
       </div>
     </GameWrapper>
   );
 }
 
-// ===== SVG SHAPE RENDERER =====
 function ShapeSVG({ name, size = 160 }: { name: string; size?: number }) {
   const colors: Record<string, { fill: string; stroke: string }> = {
-    Circle: { fill: "#3B82F6", stroke: "#2563EB" },
-    Square: { fill: "#EF4444", stroke: "#DC2626" },
-    Triangle: { fill: "#22C55E", stroke: "#16A34A" },
-    Star: { fill: "#EAB308", stroke: "#CA8A04" },
-    Heart: { fill: "#EC4899", stroke: "#DB2777" },
-    Diamond: { fill: "#A855F7", stroke: "#9333EA" },
-    Oval: { fill: "#F97316", stroke: "#EA580C" },
-    Rectangle: { fill: "#06B6D4", stroke: "#0891B2" },
-    Crescent: { fill: "#FBBF24", stroke: "#D97706" },
-    Cross: { fill: "#EF4444", stroke: "#DC2626" },
-    Arrow: { fill: "#10B981", stroke: "#059669" },
-    Hexagon: { fill: "#8B5CF6", stroke: "#7C3AED" },
+    Circle: { fill: "#3B82F6", stroke: "#2563EB" }, Square: { fill: "#EF4444", stroke: "#DC2626" }, Triangle: { fill: "#22C55E", stroke: "#16A34A" }, Star: { fill: "#EAB308", stroke: "#CA8A04" }, Heart: { fill: "#EC4899", stroke: "#DB2777" }, Diamond: { fill: "#A855F7", stroke: "#9333EA" }, Oval: { fill: "#F97316", stroke: "#EA580C" }, Rectangle: { fill: "#06B6D4", stroke: "#0891B2" }, Crescent: { fill: "#FBBF24", stroke: "#D97706" }, Cross: { fill: "#EF4444", stroke: "#DC2626" }, Arrow: { fill: "#10B981", stroke: "#059669" }, Hexagon: { fill: "#8B5CF6", stroke: "#7C3AED" },
   };
-
   const c = colors[name] || { fill: "#6B7280", stroke: "#4B5563" };
   const s = size;
   const half = s / 2;
-
   const shapes: Record<string, React.ReactNode> = {
-    Circle: (
-      <circle cx={half} cy={half} r={half * 0.8} fill={c.fill} stroke={c.stroke} strokeWidth="4" />
-    ),
-    Square: (
-      <rect x={s * 0.12} y={s * 0.12} width={s * 0.76} height={s * 0.76} rx="8" fill={c.fill} stroke={c.stroke} strokeWidth="4" />
-    ),
-    Triangle: (
-      <polygon points={`${half},${s * 0.08} ${s * 0.9},${s * 0.88} ${s * 0.1},${s * 0.88}`} fill={c.fill} stroke={c.stroke} strokeWidth="4" />
-    ),
-    Star: (
-      <polygon
-        points={(() => {
-          const pts = [];
-          for (let i = 0; i < 10; i++) {
-            const r = i % 2 === 0 ? half * 0.85 : half * 0.35;
-            const angle = (Math.PI / 5) * i - Math.PI / 2;
-            pts.push(`${half + r * Math.cos(angle)},${half + r * Math.sin(angle)}`);
-          }
-          return pts.join(" ");
-        })()}
-        fill={c.fill} stroke={c.stroke} strokeWidth="3"
-      />
-    ),
-    Heart: (
-      <path
-        d={`M${half},${s * 0.85} C${s * 0.1},${s * 0.55} ${s * 0.0},${s * 0.2} ${half},${s * 0.35} C${s},${s * 0.2} ${s * 0.9},${s * 0.55} ${half},${s * 0.85}Z`}
-        fill={c.fill} stroke={c.stroke} strokeWidth="3"
-      />
-    ),
-    Diamond: (
-      <polygon points={`${half},${s * 0.05} ${s * 0.9},${half} ${half},${s * 0.95} ${s * 0.1},${half}`} fill={c.fill} stroke={c.stroke} strokeWidth="4" />
-    ),
-    Oval: (
-      <ellipse cx={half} cy={half} rx={half * 0.85} ry={half * 0.55} fill={c.fill} stroke={c.stroke} strokeWidth="4" />
-    ),
-    Rectangle: (
-      <rect x={s * 0.08} y={s * 0.22} width={s * 0.84} height={s * 0.56} rx="8" fill={c.fill} stroke={c.stroke} strokeWidth="4" />
-    ),
-    Crescent: (
-      <path
-        d={`M${half * 1.1},${s * 0.08} A${half * 0.8},${half * 0.8} 0 1,1 ${half * 1.1},${s * 0.92} A${half * 0.6},${half * 0.7} 0 1,0 ${half * 1.1},${s * 0.08}Z`}
-        fill={c.fill} stroke={c.stroke} strokeWidth="3"
-      />
-    ),
-    Cross: (
-      <path
-        d={`M${s * 0.35},${s * 0.1} h${s * 0.3} v${s * 0.25} h${s * 0.25} v${s * 0.3} h-${s * 0.25} v${s * 0.25} h-${s * 0.3} v-${s * 0.25} h-${s * 0.25} v-${s * 0.3} h${s * 0.25}Z`}
-        fill={c.fill} stroke={c.stroke} strokeWidth="3"
-      />
-    ),
-    Arrow: (
-      <polygon
-        points={`${s * 0.9},${half} ${s * 0.4},${s * 0.1} ${s * 0.4},${s * 0.35} ${s * 0.1},${s * 0.35} ${s * 0.1},${s * 0.65} ${s * 0.4},${s * 0.65} ${s * 0.4},${s * 0.9}`}
-        fill={c.fill} stroke={c.stroke} strokeWidth="3"
-      />
-    ),
-    Hexagon: (
-      <polygon
-        points={(() => {
-          const pts = [];
-          for (let i = 0; i < 6; i++) {
-            const angle = (Math.PI / 3) * i - Math.PI / 6;
-            pts.push(`${half + half * 0.82 * Math.cos(angle)},${half + half * 0.82 * Math.sin(angle)}`);
-          }
-          return pts.join(" ");
-        })()}
-        fill={c.fill} stroke={c.stroke} strokeWidth="4"
-      />
-    ),
+    Circle: <circle cx={half} cy={half} r={half * 0.8} fill={c.fill} stroke={c.stroke} strokeWidth="4" />,
+    Square: <rect x={s * 0.12} y={s * 0.12} width={s * 0.76} height={s * 0.76} rx="8" fill={c.fill} stroke={c.stroke} strokeWidth="4" />,
+    Triangle: <polygon points={`${half},${s * 0.08} ${s * 0.9},${s * 0.88} ${s * 0.1},${s * 0.88}`} fill={c.fill} stroke={c.stroke} strokeWidth="4" />,
+    Star: <polygon points={(() => { const pts = []; for (let i = 0; i < 10; i++) { const r = i % 2 === 0 ? half * 0.85 : half * 0.35; const angle = (Math.PI / 5) * i - Math.PI / 2; pts.push(`${half + r * Math.cos(angle)},${half + r * Math.sin(angle)}`); } return pts.join(" "); })()} fill={c.fill} stroke={c.stroke} strokeWidth="3" />,
+    Heart: <path d={`M${half},${s * 0.85} C${s * 0.1},${s * 0.55} ${s * 0.0},${s * 0.2} ${half},${s * 0.35} C${s},${s * 0.2} ${s * 0.9},${s * 0.55} ${half},${s * 0.85}Z`} fill={c.fill} stroke={c.stroke} strokeWidth="3" />,
+    Diamond: <polygon points={`${half},${s * 0.05} ${s * 0.9},${half} ${half},${s * 0.95} ${s * 0.1},${half}`} fill={c.fill} stroke={c.stroke} strokeWidth="4" />,
+    Oval: <ellipse cx={half} cy={half} rx={half * 0.85} ry={half * 0.55} fill={c.fill} stroke={c.stroke} strokeWidth="4" />,
+    Rectangle: <rect x={s * 0.08} y={s * 0.22} width={s * 0.84} height={s * 0.56} rx="8" fill={c.fill} stroke={c.stroke} strokeWidth="4" />,
+    Crescent: <path d={`M${half * 1.1},${s * 0.08} A${half * 0.8},${half * 0.8} 0 1,1 ${half * 1.1},${s * 0.92} A${half * 0.6},${half * 0.7} 0 1,0 ${half * 1.1},${s * 0.08}Z`} fill={c.fill} stroke={c.stroke} strokeWidth="3" />,
+    Cross: <path d={`M${s * 0.35},${s * 0.1} h${s * 0.3} v${s * 0.25} h${s * 0.25} v${s * 0.3} h-${s * 0.25} v${s * 0.25} h-${s * 0.3} v-${s * 0.25} h-${s * 0.25} v-${s * 0.3} h${s * 0.25}Z`} fill={c.fill} stroke={c.stroke} strokeWidth="3" />,
+    Arrow: <polygon points={`${s * 0.9},${half} ${s * 0.4},${s * 0.1} ${s * 0.4},${s * 0.35} ${s * 0.1},${s * 0.35} ${s * 0.1},${s * 0.65} ${s * 0.4},${s * 0.65} ${s * 0.4},${s * 0.9}`} fill={c.fill} stroke={c.stroke} strokeWidth="3" />,
+    Hexagon: <polygon points={(() => { const pts = []; for (let i = 0; i < 6; i++) { const angle = (Math.PI / 3) * i - Math.PI / 6; pts.push(`${half + half * 0.82 * Math.cos(angle)},${half + half * 0.82 * Math.sin(angle)}`); } return pts.join(" "); })()} fill={c.fill} stroke={c.stroke} strokeWidth="4" />,
   };
-
-  return (
-    <svg width={s} height={s} viewBox={`0 0 ${s} ${s}`} className="drop-shadow-lg animate-[popIn_0.4s_ease-out]">
-      {shapes[name] || <circle cx={half} cy={half} r={half * 0.8} fill="#ccc" />}
-    </svg>
-  );
+  return <svg width={s} height={s} viewBox={`0 0 ${s} ${s}`} className="drop-shadow-lg">{shapes[name] || <circle cx={half} cy={half} r={half * 0.8} fill="#ccc" />}</svg>;
 }
 
-// ===== SHAPE GAME =====
-function ShapeGame({
-  onComplete,
-  onBack,
-}: {
-  onComplete: (score: number) => void;
-  onBack: () => void;
-}) {
+function ShapeGame({ onComplete, onBack, difficulty }: { onComplete: (score: number, total: number) => void; onBack: () => void; difficulty: Difficulty }) {
   const TOTAL = 8;
-  const [questions] = useState<ShapeQuestion[]>(() =>
-    shuffle(shapeQuestions).slice(0, TOTAL).map((q) => ({
-      ...q,
-      options: shuffle(q.options),
-    }))
-  );
+  const [questions] = useState<ShapeQuestion[]>(() => shuffle(shapeQuestions).slice(0, TOTAL).map((q) => ({ ...q, options: shuffle(q.options) })));
   const [current, setCurrent] = useState(0);
   const [score, setScore] = useState(0);
   const [selected, setSelected] = useState<string | null>(null);
   const [isCorrect, setIsCorrect] = useState<boolean | null>(null);
-
   const question = questions[current];
+  const shapeFacts: Record<string, string> = { Circle: "A circle has no corners.", Square: "A square has 4 equal sides.", Triangle: "A triangle has 3 sides.", Star: "A star has points.", Heart: "A heart has a point at the bottom.", Diamond: "A diamond looks like a tilted square.", Oval: "An oval is stretched out like an egg.", Rectangle: "A rectangle has 4 sides, two are long.", Crescent: "A crescent looks like the moon.", Cross: "A cross has lines that intersect.", Arrow: "An arrow points in a direction.", Hexagon: "A hexagon has 6 sides." };
 
   function handleSelect(option: string) {
     if (selected) return;
@@ -745,9 +792,8 @@ function ShapeGame({
       fireConfetti();
     }
     setTimeout(() => {
-      if (current + 1 >= TOTAL) {
-        onComplete(score + (correct ? 1 : 0));
-      } else {
+      if (current + 1 >= TOTAL) onComplete(score + (correct ? 1 : 0), TOTAL);
+      else {
         setCurrent((c) => c + 1);
         setSelected(null);
         setIsCorrect(null);
@@ -755,126 +801,62 @@ function ShapeGame({
     }, 1500);
   }
 
-  // Neutral button style for all options (so color doesn't give away the answer)
-  const neutralBtnStyle = "bg-gradient-to-br from-teal-50 to-emerald-50 border-teal-300 text-teal-700 hover:from-teal-100 hover:to-emerald-100";
-
   return (
-    <GameWrapper
-      title="Shape Match"
-      emoji="🔷"
-      current={current}
-      total={TOTAL}
-      score={score}
-      onBack={onBack}
-      bgGradient="bg-gradient-to-br from-teal-50 via-emerald-50 to-cyan-100"
-    >
+    <GameWrapper title="Shape Match" emoji="🔷" current={current} total={TOTAL} score={score} onBack={onBack} bgGradient="bg-gradient-to-br from-teal-50 via-emerald-50 to-cyan-100" difficulty={difficulty}>
       <div className="w-full rounded-3xl bg-white p-6 shadow-2xl sm:p-8">
-        {/* Shape display */}
-        <div className="mb-4 flex justify-center">
-          <ShapeSVG name={question.shapeName} size={160} />
-        </div>
-
-        {/* Question */}
-        <h2 className="mb-6 text-center text-2xl font-extrabold text-gray-700 sm:text-3xl">
-          What shape is this?
-        </h2>
-
-        {/* Options */}
+        <div className="mb-4 flex justify-center"><ShapeSVG name={question.shapeName} size={160} /></div>
+        <h2 className="mb-2 text-center text-2xl font-extrabold text-gray-700 sm:text-3xl">What shape is this?</h2>
+        <p className="mb-6 text-center text-sm font-semibold text-teal-400">{difficulty === "hard" ? shapeFacts[question.shapeName] : "Look at the shape carefully."}</p>
         <div className="space-y-3">
           {question.options.map((option) => {
-            let btnStyle = neutralBtnStyle;
+            let btnStyle = "bg-gradient-to-br from-teal-50 to-emerald-50 border-teal-300 text-teal-700 hover:from-teal-100 hover:to-emerald-100";
             if (selected) {
-              if (option === question.shapeName) {
-                btnStyle = "bg-green-100 border-green-400 text-green-700 scale-105";
-              } else if (option === selected && !isCorrect) {
-                btnStyle = "bg-red-100 border-red-300 text-red-500 animate-[shake_0.4s_ease-in-out]";
-              } else {
-                btnStyle = "bg-gray-50 border-gray-200 text-gray-400";
-              }
+              if (option === question.shapeName) btnStyle = "bg-green-100 border-green-400 text-green-700 scale-105";
+              else if (option === selected && !isCorrect) btnStyle = "bg-red-100 border-red-300 text-red-500 animate-[shake_0.4s_ease-in-out]";
+              else btnStyle = "bg-gray-50 border-gray-200 text-gray-400";
             }
-            return (
-              <button
-                key={option}
-                onClick={() => handleSelect(option)}
-                disabled={!!selected}
-                className={`w-full rounded-2xl border-3 p-4 text-2xl font-extrabold transition-all duration-200 cursor-pointer sm:text-3xl ${btnStyle}`}
-              >
-                {option === question.shapeName && selected
-                  ? `${option} ✅`
-                  : option === selected && !isCorrect
-                    ? `${option} ❌`
-                    : option}
-              </button>
-            );
+            return <button key={option} onClick={() => handleSelect(option)} disabled={!!selected} className={`w-full rounded-2xl border-2 p-4 text-2xl font-extrabold transition-all duration-200 cursor-pointer sm:text-3xl ${btnStyle}`}>{option}</button>;
           })}
         </div>
-
-        {/* Feedback */}
-        {selected && (
-          <div className="mt-4 text-center animate-[popIn_0.3s_ease-out]">
-            <p className={`text-2xl font-extrabold ${isCorrect ? "text-green-500" : "text-teal-400"}`}>
-              {isCorrect ? "🎉 Correct!" : `It's a ${question.shapeName}!`}
-            </p>
-          </div>
-        )}
+        {selected && <div className="mt-4 text-center"><p className={`text-2xl font-extrabold ${isCorrect ? "text-green-500" : "text-teal-400"}`}>{isCorrect ? "🎉 Correct!" : `It’s a ${question.shapeName}!`}</p><p className="mt-1 text-sm font-semibold text-teal-300">{shapeFacts[question.shapeName]}</p></div>}
       </div>
     </GameWrapper>
   );
 }
 
-// ===== MATH GAME =====
-function MathGame({
-  onComplete,
-  onBack,
-}: {
-  onComplete: (score: number) => void;
-  onBack: () => void;
-}) {
+function buildMathQuestions(difficulty: Difficulty) {
+  const all = generateMathQuestions();
+  if (difficulty === "easy") {
+    return all.map((q) => ({ ...q, num1: Math.min(q.num1, 5), num2: Math.min(q.num2, 4), answer: q.operator === "+" ? Math.min(q.num1, 5) + Math.min(q.num2, 4) : Math.max(Math.min(q.num1, 5) - Math.min(q.num2, 4), 0), options: shuffle([q.answer, Math.max(0, q.answer - 1), q.answer + 1]) }));
+  }
+  if (difficulty === "hard") {
+    return all.map((q, i) => i % 3 === 0 ? { ...q, questionType: "missing" as const, answer: q.num2, display: `${q.num1} ${q.operator} ? = ${q.operator === "+" ? q.num1 + q.num2 : q.num1 - q.num2}` } : q);
+  }
+  return all;
+}
+
+function MathGame({ onComplete, onBack, difficulty }: { onComplete: (score: number, total: number) => void; onBack: () => void; difficulty: Difficulty }) {
   const TOTAL = 8;
-  const [questions] = useState<MathQuestion[]>(() =>
-    generateMathQuestions().slice(0, TOTAL)
-  );
+  const [questions] = useState<any[]>(() => buildMathQuestions(difficulty).slice(0, TOTAL));
   const [current, setCurrent] = useState(0);
   const [score, setScore] = useState(0);
   const [selected, setSelected] = useState<number | null>(null);
   const [isCorrect, setIsCorrect] = useState<boolean | null>(null);
-
   const question = questions[current];
-
-  // Build emoji visual: show group1 OP group2
-  const group1Emojis = Array.from({ length: question.num1 }, (_, i) => (
-    <span
-      key={`a${i}`}
-      className="text-3xl sm:text-4xl inline-block animate-[popIn_0.3s_ease-out]"
-      style={{ animationDelay: `${i * 0.06}s`, animationFillMode: "both" }}
-    >
-      {question.emoji}
-    </span>
-  ));
-
-  const group2Emojis = Array.from({ length: question.num2 }, (_, i) => (
-    <span
-      key={`b${i}`}
-      className={`text-3xl sm:text-4xl inline-block animate-[popIn_0.3s_ease-out] ${question.operator === "−" ? "opacity-40 line-through" : ""}`}
-      style={{ animationDelay: `${(question.num1 + i) * 0.06}s`, animationFillMode: "both" }}
-    >
-      {question.emoji}
-    </span>
-  ));
+  const answer = question.questionType === "missing" ? question.answer : question.answer;
 
   function handleSelect(option: number) {
     if (selected !== null) return;
     setSelected(option);
-    const correct = option === question.answer;
+    const correct = option === answer;
     setIsCorrect(correct);
     if (correct) {
       setScore((s) => s + 1);
       fireConfetti();
     }
     setTimeout(() => {
-      if (current + 1 >= TOTAL) {
-        onComplete(score + (correct ? 1 : 0));
-      } else {
+      if (current + 1 >= TOTAL) onComplete(score + (correct ? 1 : 0), TOTAL);
+      else {
         setCurrent((c) => c + 1);
         setSelected(null);
         setIsCorrect(null);
@@ -882,104 +864,49 @@ function MathGame({
     }, 1500);
   }
 
+  const options = question.questionType === "missing" ? shuffle([answer, Math.max(0, answer - 1), answer + 2]) : question.options;
+  const display = question.questionType === "missing" ? question.display : `${question.num1} ${question.operator} ${question.num2} = ?`;
+
   return (
-    <GameWrapper
-      title="Math Fun"
-      emoji="➕"
-      current={current}
-      total={TOTAL}
-      score={score}
-      onBack={onBack}
-      bgGradient="bg-gradient-to-br from-rose-50 via-red-50 to-orange-100"
-    >
+    <GameWrapper title="Math Fun" emoji="➕" current={current} total={TOTAL} score={score} onBack={onBack} bgGradient="bg-gradient-to-br from-rose-50 via-red-50 to-orange-100" difficulty={difficulty}>
       <div className="w-full rounded-3xl bg-white p-6 shadow-2xl sm:p-8">
-        {/* Emoji visual helper */}
-        <div className="mb-4 rounded-2xl bg-rose-50 p-4 min-h-[80px]">
-          <div className="flex flex-wrap items-center justify-center gap-1">
-            <div className="flex flex-wrap justify-center gap-1">
-              {group1Emojis}
-            </div>
-            <span className="text-4xl sm:text-5xl font-extrabold text-rose-400 mx-2">
-              {question.operator}
-            </span>
-            <div className="flex flex-wrap justify-center gap-1">
-              {group2Emojis}
-            </div>
-          </div>
-        </div>
-
-        {/* Math equation in numbers */}
-        <h2 className="mb-6 text-center text-4xl sm:text-5xl font-extrabold text-gray-700 animate-[popIn_0.4s_ease-out]">
-          <span className="text-rose-500">{question.num1}</span>
-          <span className="text-rose-400 mx-3">{question.operator}</span>
-          <span className="text-rose-500">{question.num2}</span>
-          <span className="text-gray-400 mx-3">=</span>
-          <span className="text-rose-300">?</span>
-        </h2>
-
-        {/* Options */}
+        <div className="mb-4 rounded-2xl bg-rose-50 p-4 text-center text-sm font-semibold text-rose-400">{difficulty === "hard" ? "Some questions have a missing number." : "Use the pictures and numbers together."}</div>
+        <h2 className="mb-6 text-center text-4xl font-extrabold text-gray-700 sm:text-5xl">{display}</h2>
         <div className="flex justify-center gap-4">
-          {question.options.map((option) => {
-            let btnStyle =
-              "bg-gradient-to-br from-rose-100 to-red-100 border-rose-300 text-rose-700 hover:from-rose-200 hover:to-red-200";
+          {options.map((option: number) => {
+            let btnStyle = "bg-gradient-to-br from-rose-100 to-red-100 border-rose-300 text-rose-700 hover:from-rose-200 hover:to-red-200";
             if (selected !== null) {
-              if (option === question.answer) {
-                btnStyle =
-                  "bg-gradient-to-br from-green-100 to-emerald-200 border-green-400 text-green-700 scale-110";
-              } else if (option === selected && !isCorrect) {
-                btnStyle =
-                  "bg-gradient-to-br from-red-100 to-pink-100 border-red-300 text-red-500 animate-[shake_0.4s_ease-in-out]";
-              } else {
-                btnStyle = "bg-gray-100 border-gray-200 text-gray-400";
-              }
+              if (option === answer) btnStyle = "bg-gradient-to-br from-green-100 to-emerald-200 border-green-400 text-green-700 scale-110";
+              else if (option === selected && !isCorrect) btnStyle = "bg-gradient-to-br from-red-100 to-pink-100 border-red-300 text-red-500 animate-[shake_0.4s_ease-in-out]";
+              else btnStyle = "bg-gray-100 border-gray-200 text-gray-400";
             }
-            return (
-              <button
-                key={option}
-                onClick={() => handleSelect(option)}
-                disabled={selected !== null}
-                className={`flex h-20 w-20 sm:h-24 sm:w-24 items-center justify-center rounded-2xl border-4 text-4xl sm:text-5xl font-extrabold transition-all duration-200 cursor-pointer ${btnStyle}`}
-              >
-                {option}
-              </button>
-            );
+            return <button key={option} onClick={() => handleSelect(option)} disabled={selected !== null} className={`flex h-20 w-20 items-center justify-center rounded-2xl border-4 text-4xl font-extrabold transition-all duration-200 cursor-pointer sm:h-24 sm:w-24 sm:text-5xl ${btnStyle}`}>{option}</button>;
           })}
         </div>
-
-        {/* Feedback */}
-        {selected !== null && (
-          <div className="mt-5 text-center animate-[popIn_0.3s_ease-out]">
-            <p
-              className={`text-2xl font-extrabold ${isCorrect ? "text-green-500" : "text-rose-400"}`}
-            >
-              {isCorrect
-                ? "🎉 Correct!"
-                : `${question.num1} ${question.operator} ${question.num2} = ${question.answer}`}
-            </p>
-          </div>
-        )}
+        {selected !== null && <div className="mt-5 text-center"><p className={`text-2xl font-extrabold ${isCorrect ? "text-green-500" : "text-rose-400"}`}>{isCorrect ? "🎉 Correct!" : question.questionType === "missing" ? `The missing number is ${answer}.` : `${question.num1} ${question.operator} ${question.num2} = ${answer}`}</p></div>}
       </div>
     </GameWrapper>
   );
 }
 
-// ===== PATTERN FUN GAME =====
-function PatternGame({
-  onComplete,
-  onBack,
-}: {
-  onComplete: (score: number) => void;
-  onBack: () => void;
-}) {
+function buildPatternQuestions(difficulty: Difficulty) {
+  const all = generatePatternQuestions();
+  if (difficulty === "easy") return all.filter((q) => q.pattern.length <= 4);
+  if (difficulty === "medium") return all;
+  return all.concat([
+    { pattern: ["🔴", "🔴", "🔵", "🔴", "🔴"], answer: "🔵", options: ["🔵", "🟢", "🟡"] },
+    { pattern: ["⭐", "🌙", "☀️", "⭐", "🌙"], answer: "☀️", options: ["☀️", "⭐", "🌙"] },
+    { pattern: ["🟩", "🟨", "🟩", "🟨", "🟩"], answer: "🟨", options: ["🟨", "🟩", "🟥"] },
+  ]);
+}
+
+function PatternGame({ onComplete, onBack, difficulty }: { onComplete: (score: number, total: number) => void; onBack: () => void; difficulty: Difficulty }) {
   const TOTAL = 8;
-  const [questions] = useState<PatternQuestion[]>(() =>
-    generatePatternQuestions().slice(0, TOTAL)
-  );
+  const [questions] = useState<PatternQuestion[]>(() => buildPatternQuestions(difficulty).slice(0, TOTAL));
   const [current, setCurrent] = useState(0);
   const [score, setScore] = useState(0);
   const [selected, setSelected] = useState<string | null>(null);
   const [isCorrect, setIsCorrect] = useState<boolean | null>(null);
-
   const question = questions[current];
 
   function handleSelect(option: string) {
@@ -992,9 +919,8 @@ function PatternGame({
       fireConfetti();
     }
     setTimeout(() => {
-      if (current + 1 >= TOTAL) {
-        onComplete(score + (correct ? 1 : 0));
-      } else {
+      if (current + 1 >= TOTAL) onComplete(score + (correct ? 1 : 0), TOTAL);
+      else {
         setCurrent((c) => c + 1);
         setSelected(null);
         setIsCorrect(null);
@@ -1003,108 +929,51 @@ function PatternGame({
   }
 
   return (
-    <GameWrapper
-      title="Pattern Fun"
-      emoji="🧩"
-      current={current}
-      total={TOTAL}
-      score={score}
-      onBack={onBack}
-      bgGradient="bg-gradient-to-br from-indigo-50 via-violet-50 to-purple-100"
-    >
+    <GameWrapper title="Pattern Fun" emoji="🧩" current={current} total={TOTAL} score={score} onBack={onBack} bgGradient="bg-gradient-to-br from-indigo-50 via-violet-50 to-purple-100" difficulty={difficulty}>
       <div className="w-full rounded-3xl bg-white p-6 shadow-2xl sm:p-8">
-        {/* Prompt */}
-        <div className="mb-3 text-center">
-          <p className="text-xl font-bold text-gray-400 mb-1">What comes next?</p>
-        </div>
-
-        {/* Pattern display */}
+        <div className="mb-3 text-center"><p className="mb-1 text-xl font-bold text-gray-400">What comes next?</p><p className="text-sm font-semibold text-indigo-300">{difficulty === "hard" ? "Look for the repeating rule." : "Look for the pattern."}</p></div>
         <div className="mb-6 flex flex-wrap items-center justify-center gap-2 rounded-2xl bg-gradient-to-br from-indigo-50 to-violet-50 p-5">
-          {question.pattern.map((item, idx) => (
-            <span
-              key={idx}
-              className="text-4xl sm:text-5xl animate-[popIn_0.3s_ease-out]"
-              style={{ animationDelay: `${idx * 0.08}s`, animationFillMode: "both" }}
-            >
-              {item}
-            </span>
-          ))}
-          <span className="text-4xl sm:text-5xl animate-pulse font-bold text-indigo-400">❓</span>
+          {question.pattern.map((item, idx) => <span key={idx} className="text-4xl sm:text-5xl">{item}</span>)}
+          <span className="animate-pulse text-4xl font-bold text-indigo-400 sm:text-5xl">❓</span>
         </div>
-
-        {/* Options */}
         <div className="flex justify-center gap-4 sm:gap-6">
           {question.options.map((option) => {
-            let btnStyle =
-              "bg-gradient-to-br from-indigo-100 to-violet-100 border-indigo-300 hover:from-indigo-200 hover:to-violet-200";
+            let btnStyle = "bg-gradient-to-br from-indigo-100 to-violet-100 border-indigo-300 hover:from-indigo-200 hover:to-violet-200";
             if (selected !== null) {
-              if (option === question.answer) {
-                btnStyle =
-                  "bg-gradient-to-br from-green-100 to-emerald-200 border-green-400 scale-110";
-              } else if (option === selected && !isCorrect) {
-                btnStyle =
-                  "bg-gradient-to-br from-red-100 to-pink-100 border-red-300 animate-[shake_0.4s_ease-in-out]";
-              } else {
-                btnStyle = "bg-gray-100 border-gray-200 opacity-50";
-              }
+              if (option === question.answer) btnStyle = "bg-gradient-to-br from-green-100 to-emerald-200 border-green-400 scale-110";
+              else if (option === selected && !isCorrect) btnStyle = "bg-gradient-to-br from-red-100 to-pink-100 border-red-300 animate-[shake_0.4s_ease-in-out]";
+              else btnStyle = "bg-gray-100 border-gray-200 opacity-50";
             }
-            return (
-              <button
-                key={option}
-                onClick={() => handleSelect(option)}
-                disabled={selected !== null}
-                className={`flex h-20 w-20 sm:h-24 sm:w-24 items-center justify-center rounded-2xl border-4 text-4xl sm:text-5xl transition-all duration-200 cursor-pointer ${btnStyle}`}
-              >
-                {option}
-              </button>
-            );
+            return <button key={option} onClick={() => handleSelect(option)} disabled={selected !== null} className={`flex h-20 w-20 items-center justify-center rounded-2xl border-4 text-4xl transition-all duration-200 cursor-pointer sm:h-24 sm:w-24 sm:text-5xl ${btnStyle}`}>{option}</button>;
           })}
         </div>
-
-        {/* Feedback */}
-        {selected !== null && (
-          <div className="mt-5 text-center animate-[popIn_0.3s_ease-out]">
-            <p
-              className={`text-2xl font-extrabold ${isCorrect ? "text-green-500" : "text-indigo-400"}`}
-            >
-              {isCorrect ? "🎉 Correct!" : `It was ${question.answer}`}
-            </p>
-          </div>
-        )}
+        {selected !== null && <div className="mt-5 text-center"><p className={`text-2xl font-extrabold ${isCorrect ? "text-green-500" : "text-indigo-400"}`}>{isCorrect ? "🎉 Correct!" : `It was ${question.answer}`}</p></div>}
       </div>
     </GameWrapper>
   );
 }
 
-// ===== BIGGER OR SMALLER (COMPARE) GAME =====
-function CompareGame({
-  onComplete,
-  onBack,
-}: {
-  onComplete: (score: number) => void;
-  onBack: () => void;
-}) {
+function buildCompareQuestions(difficulty: Difficulty) {
+  const all = generateCompareQuestions();
+  if (difficulty === "easy") return all.filter((q) => q.valueA < 20 && q.valueB < 20);
+  if (difficulty === "medium") return all;
+  return all.concat([
+    { labelA: "18 + 3", valueA: 21, labelB: "20", valueB: 20, answer: ">", type: "expression" },
+    { labelA: "27", valueA: 27, labelB: "14 + 13", valueB: 27, answer: "=", type: "expression" },
+    { labelA: "32", valueA: 32, labelB: "19 + 9", valueB: 28, answer: ">", type: "expression" },
+  ]);
+}
+
+function CompareGame({ onComplete, onBack, difficulty }: { onComplete: (score: number, total: number) => void; onBack: () => void; difficulty: Difficulty }) {
   const TOTAL = 8;
-  const [questions] = useState<CompareQuestion[]>(() =>
-    generateCompareQuestions().slice(0, TOTAL)
-  );
+  const [questions] = useState<CompareQuestion[]>(() => buildCompareQuestions(difficulty).slice(0, TOTAL));
   const [current, setCurrent] = useState(0);
   const [score, setScore] = useState(0);
   const [selected, setSelected] = useState<string | null>(null);
   const [isCorrect, setIsCorrect] = useState<boolean | null>(null);
-
   const question = questions[current];
-
-  const symbolIcons: Record<string, string> = {
-    ">": "›",
-    "<": "‹",
-    "=": "=",
-  };
-  const symbolLabels: Record<string, string> = {
-    ">": "Greater Than",
-    "<": "Less Than",
-    "=": "Equal",
-  };
+  const symbolIcons: Record<string, string> = { ">": "›", "<": "‹", "=": "=" };
+  const symbolLabels: Record<string, string> = { ">": "Greater Than", "<": "Less Than", "=": "Equal" };
 
   function handleSelect(choice: string) {
     if (selected) return;
@@ -1116,9 +985,8 @@ function CompareGame({
       fireConfetti();
     }
     setTimeout(() => {
-      if (current + 1 >= TOTAL) {
-        onComplete(score + (correct ? 1 : 0));
-      } else {
+      if (current + 1 >= TOTAL) onComplete(score + (correct ? 1 : 0), TOTAL);
+      else {
         setCurrent((c) => c + 1);
         setSelected(null);
         setIsCorrect(null);
@@ -1127,86 +995,83 @@ function CompareGame({
   }
 
   const choices: Array<">" | "<" | "="> = [">", "<", "="];
-
   function getButtonStyle(choice: string) {
-    const base =
-      "w-full rounded-2xl border-4 px-3 py-4 sm:px-5 sm:py-5 font-extrabold transition-all duration-200 cursor-pointer flex flex-col items-center justify-center gap-1";
-    if (selected === null) {
-      return `${base} bg-gradient-to-br from-amber-100 to-yellow-100 border-amber-300 text-amber-700 hover:from-amber-200 hover:to-yellow-200 hover:scale-[1.03] active:scale-[0.97]`;
-    }
-    if (choice === question.answer) {
-      return `${base} bg-gradient-to-br from-green-100 to-emerald-200 border-green-400 text-green-700 scale-[1.05]`;
-    }
-    if (choice === selected && !isCorrect) {
-      return `${base} bg-gradient-to-br from-red-100 to-pink-100 border-red-300 text-red-500 animate-[shake_0.4s_ease-in-out]`;
-    }
+    const base = "w-full rounded-2xl border-4 px-3 py-4 sm:px-5 sm:py-5 font-extrabold transition-all duration-200 cursor-pointer flex flex-col items-center justify-center gap-1";
+    if (selected === null) return `${base} bg-gradient-to-br from-amber-100 to-yellow-100 border-amber-300 text-amber-700 hover:from-amber-200 hover:to-yellow-200 hover:scale-[1.03] active:scale-[0.97]`;
+    if (choice === question.answer) return `${base} bg-gradient-to-br from-green-100 to-emerald-200 border-green-400 text-green-700 scale-[1.05]`;
+    if (choice === selected && !isCorrect) return `${base} bg-gradient-to-br from-red-100 to-pink-100 border-red-300 text-red-500 animate-[shake_0.4s_ease-in-out]`;
     return `${base} bg-gray-100 border-gray-200 text-gray-400 opacity-50`;
   }
 
   return (
-    <GameWrapper
-      title="Compare Numbers"
-      emoji="📏"
-      current={current}
-      total={TOTAL}
-      score={score}
-      onBack={onBack}
-      bgGradient="bg-gradient-to-br from-amber-50 via-yellow-50 to-orange-100"
-    >
+    <GameWrapper title="Compare Numbers" emoji="📏" current={current} total={TOTAL} score={score} onBack={onBack} bgGradient="bg-gradient-to-br from-amber-50 via-yellow-50 to-orange-100" difficulty={difficulty}>
       <div className="w-full rounded-3xl bg-white p-6 shadow-2xl sm:p-8">
-        {/* Prompt */}
-        <div className="mb-4 text-center">
-          <p className="text-lg font-bold text-gray-400 mb-2">Which symbol goes in between?</p>
-        </div>
-
-        {/* The two values side by side */}
+        <div className="mb-4 text-center"><p className="mb-2 text-lg font-bold text-gray-400">Which symbol goes in between?</p><p className="text-sm font-semibold text-amber-300">{difficulty === "hard" ? "Some are equations, solve before you compare." : "Compare the two amounts."}</p></div>
         <div className="mb-6 flex items-center justify-center gap-3 sm:gap-5">
-          <div className="rounded-2xl bg-gradient-to-br from-indigo-100 to-blue-100 border-4 border-indigo-300 px-5 py-4 sm:px-8 sm:py-5 animate-[popIn_0.4s_ease-out]">
-            <span className="text-3xl sm:text-5xl font-extrabold text-indigo-600">
-              {question.labelA}
-            </span>
-          </div>
-
-          <div className="flex items-center">
-            <span className="text-5xl sm:text-6xl font-extrabold text-amber-400 animate-[float_2s_ease-in-out_infinite]">
-              ?
-            </span>
-          </div>
-
-          <div className="rounded-2xl bg-gradient-to-br from-purple-100 to-fuchsia-100 border-4 border-purple-300 px-5 py-4 sm:px-8 sm:py-5 animate-[popIn_0.4s_ease-out_0.1s_both]">
-            <span className="text-3xl sm:text-5xl font-extrabold text-purple-600">
-              {question.labelB}
-            </span>
-          </div>
+          <div className="rounded-2xl border-4 border-indigo-300 bg-gradient-to-br from-indigo-100 to-blue-100 px-5 py-4 sm:px-8 sm:py-5"><span className="text-3xl font-extrabold text-indigo-600 sm:text-5xl">{question.labelA}</span></div>
+          <div className="flex items-center"><span className="text-5xl font-extrabold text-amber-400 sm:text-6xl">?</span></div>
+          <div className="rounded-2xl border-4 border-purple-300 bg-gradient-to-br from-purple-100 to-fuchsia-100 px-5 py-4 sm:px-8 sm:py-5"><span className="text-3xl font-extrabold text-purple-600 sm:text-5xl">{question.labelB}</span></div>
         </div>
-
-        {/* Answer choices */}
-        <div className="grid grid-cols-3 gap-2 sm:gap-3 mb-3">
-          {choices.map((c) => (
-            <button
-              key={c}
-              onClick={() => handleSelect(c)}
-              disabled={selected !== null}
-              className={getButtonStyle(c)}
-            >
-              <span className="text-3xl sm:text-5xl leading-none">{symbolIcons[c]}</span>
-              <span className="text-xs sm:text-base leading-tight">{symbolLabels[c]}</span>
-            </button>
-          ))}
+        <div className="mb-3 grid grid-cols-3 gap-2 sm:gap-3">
+          {choices.map((c) => <button key={c} onClick={() => handleSelect(c)} disabled={selected !== null} className={getButtonStyle(c)}><span className="text-3xl leading-none sm:text-5xl">{symbolIcons[c]}</span><span className="text-xs leading-tight sm:text-base">{symbolLabels[c]}</span></button>)}
         </div>
+        {selected !== null && <div className="mt-4 text-center"><p className={`text-xl font-extrabold sm:text-2xl ${isCorrect ? "text-green-500" : "text-amber-500"}`}>{isCorrect ? "🎉 Correct!" : `${question.labelA} = ${question.valueA}, ${question.labelB} = ${question.valueB} → ${question.answer}`}</p></div>}
+      </div>
+    </GameWrapper>
+  );
+}
 
-        {/* Feedback */}
-        {selected !== null && (
-          <div className="mt-4 text-center animate-[popIn_0.3s_ease-out]">
-            <p
-              className={`text-xl sm:text-2xl font-extrabold ${isCorrect ? "text-green-500" : "text-amber-500"}`}
-            >
-              {isCorrect
-                ? "🎉 Correct!"
-                : `${question.labelA} = ${question.valueA}, ${question.labelB} = ${question.valueB} → Answer: ${question.answer}`}
-            </p>
-          </div>
-        )}
+function buildPhonicsQuestions(difficulty: Difficulty) {
+  if (difficulty === "easy") return phonicsQuestions.filter((q) => q.prompt.includes("starts with")).slice(0, 8);
+  if (difficulty === "medium") return shuffle(phonicsQuestions).slice(0, 8);
+  return shuffle(phonicsQuestions).slice(0, 10);
+}
+
+function PhonicsGame({ onComplete, onBack, difficulty }: { onComplete: (score: number, total: number) => void; onBack: () => void; difficulty: Difficulty }) {
+  const TOTAL = difficulty === "hard" ? 10 : 8;
+  const [questions] = useState<PhonicsQuestion[]>(() => buildPhonicsQuestions(difficulty));
+  const [current, setCurrent] = useState(0);
+  const [score, setScore] = useState(0);
+  const [selected, setSelected] = useState<string | null>(null);
+  const [isCorrect, setIsCorrect] = useState<boolean | null>(null);
+  const question = questions[current];
+
+  function handleSelect(option: string) {
+    if (selected) return;
+    setSelected(option);
+    const correct = option === question.answer;
+    setIsCorrect(correct);
+    if (correct) {
+      setScore((s) => s + 1);
+      fireConfetti();
+    }
+    setTimeout(() => {
+      if (current + 1 >= TOTAL) onComplete(score + (correct ? 1 : 0), TOTAL);
+      else {
+        setCurrent((c) => c + 1);
+        setSelected(null);
+        setIsCorrect(null);
+      }
+    }, 1500);
+  }
+
+  return (
+    <GameWrapper title="Phonics Fun" emoji="📚" current={current} total={TOTAL} score={score} onBack={onBack} bgGradient="bg-gradient-to-br from-lime-50 via-green-50 to-emerald-100" difficulty={difficulty}>
+      <div className="w-full rounded-3xl bg-white p-6 shadow-2xl sm:p-8">
+        <div className="mb-3 text-center"><p className="mb-1 text-xl font-bold text-gray-400">Sound it out!</p><h2 className="text-3xl font-extrabold text-green-600 sm:text-4xl">{question.prompt}</h2></div>
+        <p className="mb-6 text-center text-sm font-semibold text-green-400">Listen for the first sound or ending rhyme.</p>
+        <div className="space-y-3">
+          {question.choices.map((choice) => {
+            let btnStyle = "bg-gradient-to-br from-lime-50 to-green-50 border-lime-300 text-green-700 hover:from-lime-100 hover:to-green-100";
+            if (selected) {
+              if (choice.label === question.answer) btnStyle = "bg-green-100 border-green-400 text-green-700 scale-[1.02]";
+              else if (choice.label === selected && !isCorrect) btnStyle = "bg-red-100 border-red-300 text-red-500 animate-[shake_0.4s_ease-in-out]";
+              else btnStyle = "bg-gray-50 border-gray-200 text-gray-400";
+            }
+            return <button key={choice.label} onClick={() => handleSelect(choice.label)} disabled={!!selected} className={`flex w-full items-center gap-4 rounded-2xl border-2 p-4 text-left transition-all duration-200 cursor-pointer ${btnStyle}`}><span className="text-4xl">{choice.emoji}</span><span className="text-2xl font-extrabold">{choice.label}</span></button>;
+          })}
+        </div>
+        {selected && <div className="mt-4 text-center"><p className={`text-2xl font-extrabold ${isCorrect ? "text-green-500" : "text-lime-500"}`}>{isCorrect ? "🎉 Nice reading!" : `The answer is ${question.answer}.`}</p><p className="mt-1 text-sm font-semibold text-green-300">{question.hint}</p></div>}
       </div>
     </GameWrapper>
   );
