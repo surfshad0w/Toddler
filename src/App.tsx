@@ -19,7 +19,7 @@ import {
 } from "./data/gameData";
 
 type Difficulty = "easy" | "medium" | "hard";
-type GameMode = "menu" | "findit" | "counting" | "colors" | "shapes" | "math" | "pattern" | "compare" | "phonics" | "done";
+type GameMode = "menu" | "findit" | "counting" | "colors" | "shapes" | "math" | "pattern" | "compare" | "phonics" | "bubbles" | "done";
 
 type ProgressRecord = Record<GameMode, Record<Difficulty, number>>;
 type Achievement = {
@@ -38,7 +38,7 @@ type PhonicsQuestion = {
 
 const STORAGE_KEY = "toddler-site-progress-v2";
 const difficulties: Difficulty[] = ["easy", "medium", "hard"];
-const playableModes: GameMode[] = ["findit", "counting", "colors", "shapes", "math", "pattern", "compare", "phonics"];
+const playableModes: GameMode[] = ["findit", "counting", "colors", "shapes", "math", "pattern", "compare", "phonics", "bubbles"];
 
 const difficultyLabels: Record<Difficulty, string> = {
   easy: "Easy",
@@ -62,6 +62,7 @@ const modeEmoji: Record<GameMode, string> = {
   pattern: "🧩",
   compare: "📏",
   phonics: "📚",
+  bubbles: "🫧",
   done: "🎉",
 };
 
@@ -75,6 +76,7 @@ const modeTitles: Record<GameMode, string> = {
   pattern: "Pattern Fun",
   compare: "Compare Numbers",
   phonics: "Phonics Fun",
+  bubbles: "Bubble Pop",
   done: "Done",
 };
 
@@ -214,6 +216,7 @@ function getAchievementState(progress: ProgressRecord): Achievement[] {
   const bestPattern = Math.max(...difficulties.map((d) => progress.pattern[d] ?? 0));
   const bestCompare = Math.max(...difficulties.map((d) => progress.compare[d] ?? 0));
   const bestPhonics = Math.max(...difficulties.map((d) => progress.phonics[d] ?? 0));
+  const bestBubbles = Math.max(...difficulties.map((d) => progress.bubbles?.[d] ?? 0));
   const masteredGames = playableModes.filter((mode) => Object.values(progress[mode]).some((score) => score >= 8)).length;
 
   return [
@@ -221,6 +224,7 @@ function getAchievementState(progress: ProgressRecord): Achievement[] {
     { id: "pattern-detective", label: "Pattern Detective", emoji: "🧩", unlocked: bestPattern >= 6 },
     { id: "compare-captain", label: "Compare Captain", emoji: "📏", unlocked: bestCompare >= 6 },
     { id: "reading-rockstar", label: "Reading Rockstar", emoji: "📚", unlocked: bestPhonics >= 6 },
+    { id: "bubble-master", label: "Bubble Master", emoji: "🫧", unlocked: bestBubbles >= 6 },
     { id: "super-learner", label: "Super Learner", emoji: "🌟", unlocked: masteredGames >= 4 },
   ];
 }
@@ -344,6 +348,9 @@ export function App() {
   if (mode === "phonics") {
     return <PhonicsGame difficulty={difficulty} onComplete={handleGameComplete} onBack={() => setMode("menu")} />;
   }
+  if (mode === "bubbles") {
+    return <BubblePopGame difficulty={difficulty} onComplete={handleGameComplete} onBack={() => setMode("menu")} />;
+  }
   if (mode === "done") {
     return (
       <DoneScreen
@@ -384,6 +391,7 @@ function MainMenu({
     { key: "pattern" as GameMode, emoji: "🧩", title: "Pattern Fun", subtitle: "AB, AAB, ABC, and more", gradient: "from-indigo-400 to-violet-500", bg: "bg-indigo-50" },
     { key: "compare" as GameMode, emoji: "📏", title: "Compare Numbers", subtitle: "Greater, less, equal, and ordering", gradient: "from-amber-400 to-yellow-500", bg: "bg-amber-50" },
     { key: "phonics" as GameMode, emoji: "📚", title: "Phonics Fun", subtitle: "Beginning sounds and rhymes", gradient: "from-lime-400 to-green-500", bg: "bg-lime-50" },
+    { key: "bubbles" as GameMode, emoji: "🫧", title: "Bubble Pop", subtitle: "Pop the letter bubbles!", gradient: "from-sky-400 to-blue-500", bg: "bg-sky-50" },
   ];
 
   return (
@@ -1072,6 +1080,365 @@ function PhonicsGame({ onComplete, onBack, difficulty }: { onComplete: (score: n
           })}
         </div>
         {selected && <div className="mt-4 text-center"><p className={`text-2xl font-extrabold ${isCorrect ? "text-green-500" : "text-lime-500"}`}>{isCorrect ? "🎉 Nice reading!" : `The answer is ${question.answer}.`}</p><p className="mt-1 text-sm font-semibold text-green-300">{question.hint}</p></div>}
+      </div>
+    </GameWrapper>
+  );
+}
+
+// ============ BUBBLE POP LETTERS ============
+
+type BubbleData = {
+  id: string;
+  letter: string;
+  x: number;
+  y: number;
+  size: number;
+  color: string;
+  animDelay: number;
+  animDuration: number;
+  isCorrect: boolean;
+};
+
+type BubbleRound = {
+  targetLetter: string;
+  bubbles: BubbleData[];
+};
+
+const BUBBLE_COLORS = [
+  "linear-gradient(135deg, #FF6B6B 0%, #FF8E8E 50%, #FFB4B4 100%)",
+  "linear-gradient(135deg, #4ECDC4 0%, #6EE7DE 50%, #A8F0EA 100%)",
+  "linear-gradient(135deg, #45B7D1 0%, #6BC5D8 50%, #96D9E8 100%)",
+  "linear-gradient(135deg, #96CEB4 0%, #AEDBC5 50%, #C8E8D6 100%)",
+  "linear-gradient(135deg, #FFEAA7 0%, #FFF0BE 50%, #FFF5D4 100%)",
+  "linear-gradient(135deg, #DDA0DD 0%, #E6B8E6 50%, #F0D0F0 100%)",
+  "linear-gradient(135deg, #FF9A76 0%, #FFB396 50%, #FFCBB5 100%)",
+  "linear-gradient(135deg, #74B9FF 0%, #93CAFF 50%, #B2DBFF 100%)",
+  "linear-gradient(135deg, #A29BFE 0%, #B8B3FE 50%, #CECAFE 100%)",
+  "linear-gradient(135deg, #FD79A8 0%, #FE97BB 50%, #FFB5CE 100%)",
+  "linear-gradient(135deg, #55EFC4 0%, #7AF3D5 50%, #9FF7E6 100%)",
+  "linear-gradient(135deg, #FDCB6E 0%, #FEDA8E 50%, #FEE8AE 100%)",
+];
+
+function generateBubbleRounds(difficulty: Difficulty): BubbleRound[] {
+  const rounds: BubbleRound[] = [];
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+  const totalRounds = 8;
+
+  // Similar-looking letter groups for hard mode
+  const trickyGroups: string[][] = [
+    ["B", "D", "P", "R"],
+    ["M", "N", "W"],
+    ["C", "G", "O", "Q"],
+    ["I", "L", "T"],
+    ["E", "F"],
+    ["U", "V"],
+    ["S", "Z"],
+    ["K", "X"],
+  ];
+
+  const bubbleCount = difficulty === "easy" ? 4 : difficulty === "medium" ? 5 : 6;
+  const usedLetters = new Set<string>();
+
+  for (let r = 0; r < totalRounds; r++) {
+    // Pick target letter (avoid repeats)
+    let target: string;
+    do {
+      target = alphabet[Math.floor(Math.random() * alphabet.length)];
+    } while (usedLetters.has(target) && usedLetters.size < 20);
+    usedLetters.add(target);
+
+    // Generate distractors
+    const distractors: string[] = [];
+    if (difficulty === "hard") {
+      // Use similar-looking letters as distractors
+      const group = trickyGroups.find((g) => g.includes(target));
+      if (group) {
+        const similar = group.filter((l) => l !== target);
+        distractors.push(...shuffle(similar).slice(0, bubbleCount - 1));
+      }
+      // Fill remaining with random
+      while (distractors.length < bubbleCount - 1) {
+        const randomLetter = alphabet[Math.floor(Math.random() * alphabet.length)];
+        if (randomLetter !== target && !distractors.includes(randomLetter)) {
+          distractors.push(randomLetter);
+        }
+      }
+    } else {
+      while (distractors.length < bubbleCount - 1) {
+        const randomLetter = alphabet[Math.floor(Math.random() * alphabet.length)];
+        if (randomLetter !== target && !distractors.includes(randomLetter)) {
+          distractors.push(randomLetter);
+        }
+      }
+    }
+
+    // For medium, randomly show some letters as lowercase
+    const allLetters = shuffle([target, ...distractors]).map((letter) => {
+      if (difficulty === "medium" && Math.random() > 0.5) {
+        return letter.toLowerCase();
+      }
+      if (difficulty === "hard" && Math.random() > 0.6) {
+        return letter.toLowerCase();
+      }
+      return letter;
+    });
+
+    // Target display: for medium/hard, show both cases
+    const displayTarget =
+      difficulty === "easy" ? target : `${target}`;
+
+    // Generate bubble positions (avoid overlapping)
+    const bubbles: BubbleData[] = [];
+    const positions: { x: number; y: number }[] = [];
+
+    for (let i = 0; i < allLetters.length; i++) {
+      const letter = allLetters[i];
+      const size = difficulty === "easy" ? 90 : difficulty === "medium" ? 80 : 72;
+
+      // Find non-overlapping position
+      let x: number, y: number;
+      let attempts = 0;
+      do {
+        x = 10 + Math.random() * (100 - size / 4 - 20);
+        y = 5 + Math.random() * (100 - size / 4 - 15);
+        attempts++;
+      } while (
+        attempts < 50 &&
+        positions.some(
+          (p) => Math.abs(p.x - x) < (size / 4 + 4) && Math.abs(p.y - y) < (size / 4 + 4)
+        )
+      );
+      positions.push({ x, y });
+
+      bubbles.push({
+        id: `${r}-${i}`,
+        letter,
+        x,
+        y,
+        size,
+        color: BUBBLE_COLORS[Math.floor(Math.random() * BUBBLE_COLORS.length)],
+        animDelay: Math.random() * 1.5,
+        animDuration: 2.5 + Math.random() * 2,
+        isCorrect: letter.toUpperCase() === target.toUpperCase(),
+      });
+    }
+
+    rounds.push({ targetLetter: displayTarget, bubbles });
+  }
+
+  return rounds;
+}
+
+function BubblePopGame({
+  onComplete,
+  onBack,
+  difficulty,
+}: {
+  onComplete: (score: number, total: number) => void;
+  onBack: () => void;
+  difficulty: Difficulty;
+}) {
+  const TOTAL = 8;
+  const [rounds] = useState<BubbleRound[]>(() => generateBubbleRounds(difficulty));
+  const [current, setCurrent] = useState(0);
+  const [score, setScore] = useState(0);
+  const [poppedId, setPoppedId] = useState<string | null>(null);
+  const [wrongId, setWrongId] = useState<string | null>(null);
+  const [isCorrect, setIsCorrect] = useState<boolean | null>(null);
+  const [showResult, setShowResult] = useState(false);
+
+  const round = rounds[current];
+
+  function handleBubblePop(bubble: BubbleData) {
+    if (poppedId || wrongId) return;
+
+    if (bubble.isCorrect) {
+      setPoppedId(bubble.id);
+      setIsCorrect(true);
+      setScore((s) => s + 1);
+      fireConfetti();
+      setShowResult(true);
+      setTimeout(() => {
+        if (current + 1 >= TOTAL) {
+          onComplete(score + 1, TOTAL);
+        } else {
+          setCurrent((c) => c + 1);
+          setPoppedId(null);
+          setWrongId(null);
+          setIsCorrect(null);
+          setShowResult(false);
+        }
+      }, 1600);
+    } else {
+      setWrongId(bubble.id);
+      setIsCorrect(false);
+      setShowResult(true);
+      setTimeout(() => {
+        setWrongId(null);
+      }, 600);
+      setTimeout(() => {
+        // Show the correct one highlighted, then move on
+        setPoppedId(round.bubbles.find((b) => b.isCorrect)?.id || null);
+        setTimeout(() => {
+          if (current + 1 >= TOTAL) {
+            onComplete(score, TOTAL);
+          } else {
+            setCurrent((c) => c + 1);
+            setPoppedId(null);
+            setWrongId(null);
+            setIsCorrect(null);
+            setShowResult(false);
+          }
+        }, 1400);
+      }, 800);
+    }
+  }
+
+  return (
+    <GameWrapper
+      title="Bubble Pop"
+      emoji="🫧"
+      current={current}
+      total={TOTAL}
+      score={score}
+      onBack={onBack}
+      bgGradient="bg-gradient-to-br from-sky-100 via-blue-50 to-cyan-100"
+      difficulty={difficulty}
+    >
+      <div className="w-full rounded-3xl bg-white/90 p-5 shadow-2xl backdrop-blur-sm sm:p-7">
+        {/* Target letter display */}
+        <div className="mb-4 text-center">
+          <p className="mb-1 text-lg font-bold text-gray-400">Pop the bubble with...</p>
+          <div
+            className="mx-auto flex h-20 w-20 items-center justify-center rounded-2xl border-4 border-sky-300 bg-gradient-to-br from-sky-100 to-blue-200 shadow-lg sm:h-24 sm:w-24"
+            style={{ animation: "targetPulse 2s ease-in-out infinite" }}
+          >
+            <span className="text-5xl font-black text-sky-700 sm:text-6xl">
+              {round.targetLetter}
+            </span>
+          </div>
+          <p className="mt-2 text-sm font-semibold text-sky-400">
+            {difficulty === "easy"
+              ? "Find the matching letter!"
+              : difficulty === "medium"
+                ? "Uppercase or lowercase — find it!"
+                : "Watch out for tricky look-alikes!"}
+          </p>
+        </div>
+
+        {/* Bubble field */}
+        <div
+          className="relative mx-auto overflow-hidden rounded-3xl border-2 border-sky-200 bg-gradient-to-b from-sky-50 via-blue-50 to-cyan-50"
+          style={{ height: "320px", maxWidth: "440px" }}
+        >
+          {/* Decorative background bubbles */}
+          {[...Array(6)].map((_, i) => (
+            <div
+              key={`bg-${i}`}
+              className="absolute rounded-full bg-sky-100/40"
+              style={{
+                width: `${20 + i * 8}px`,
+                height: `${20 + i * 8}px`,
+                left: `${15 + i * 14}%`,
+                top: `${10 + (i % 3) * 30}%`,
+                animation: `bubbleFloat ${3 + i * 0.5}s ease-in-out infinite`,
+                animationDelay: `${i * 0.3}s`,
+              }}
+            />
+          ))}
+
+          {/* Interactive bubbles */}
+          {round.bubbles.map((bubble) => {
+            const isPopped = poppedId === bubble.id;
+            const isWrong = wrongId === bubble.id;
+            const isRevealed = poppedId && bubble.isCorrect && !isPopped && isCorrect === false;
+
+            return (
+              <button
+                key={bubble.id}
+                onClick={() => handleBubblePop(bubble)}
+                disabled={!!poppedId}
+                className="absolute cursor-pointer"
+                style={{
+                  left: `${bubble.x}%`,
+                  top: `${bubble.y}%`,
+                  width: `${bubble.size}px`,
+                  height: `${bubble.size}px`,
+                  transform: "translate(-50%, -50%)",
+                  animation: isPopped
+                    ? "bubblePop 0.4s ease-out forwards"
+                    : isWrong
+                      ? "shake 0.4s ease-in-out"
+                      : `bubbleSpawn 0.5s ease-out ${bubble.animDelay}s both, bubbleFloat ${bubble.animDuration}s ease-in-out ${bubble.animDelay + 0.5}s infinite`,
+                  zIndex: isPopped || isWrong ? 20 : 10,
+                  filter: poppedId && !isPopped && !isRevealed ? "brightness(0.7) saturate(0.5)" : undefined,
+                }}
+              >
+                <div
+                  className="relative flex h-full w-full items-center justify-center rounded-full shadow-lg transition-shadow hover:shadow-xl"
+                  style={{
+                    background: bubble.color,
+                    border: isRevealed
+                      ? "4px solid #22C55E"
+                      : isWrong
+                        ? "4px solid #EF4444"
+                        : "3px solid rgba(255,255,255,0.6)",
+                    boxShadow: isRevealed
+                      ? "0 0 20px rgba(34,197,94,0.5)"
+                      : isWrong
+                        ? "0 0 20px rgba(239,68,68,0.5)"
+                        : "0 4px 15px rgba(0,0,0,0.1), inset 0 -4px 8px rgba(0,0,0,0.05)",
+                  }}
+                >
+                  {/* Bubble shine/glare effect */}
+                  <div
+                    className="absolute rounded-full bg-white/50"
+                    style={{
+                      width: "35%",
+                      height: "20%",
+                      top: "15%",
+                      left: "20%",
+                      borderRadius: "50%",
+                      animation: `bubbleShine ${bubble.animDuration}s ease-in-out infinite`,
+                      animationDelay: `${bubble.animDelay}s`,
+                    }}
+                  />
+                  {/* Letter */}
+                  <span
+                    className="relative font-black drop-shadow-sm"
+                    style={{
+                      fontSize: `${bubble.size * 0.45}px`,
+                      color: "rgba(0,0,0,0.65)",
+                      textShadow: "0 1px 2px rgba(255,255,255,0.6)",
+                    }}
+                  >
+                    {bubble.letter}
+                  </span>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Feedback */}
+        {showResult && (
+          <div className="mt-4 text-center">
+            <p
+              className={`text-2xl font-extrabold ${isCorrect ? "text-green-500" : "text-sky-400"}`}
+            >
+              {isCorrect
+                ? "🎉 Pop! Great job!"
+                : `Oops! Look for ${round.targetLetter}`}
+            </p>
+            <p className="mt-1 text-sm font-semibold text-sky-300">
+              {isCorrect
+                ? difficulty === "hard"
+                  ? "You spotted it through the tricky letters!"
+                  : "You found the right letter!"
+                : "Try the next one!"}
+            </p>
+          </div>
+        )}
       </div>
     </GameWrapper>
   );
