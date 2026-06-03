@@ -19,14 +19,54 @@ import {
 } from "./data/gameData";
 
 type Difficulty = "easy" | "medium" | "hard";
-type GameMode = "menu" | "findit" | "counting" | "colors" | "shapes" | "math" | "pattern" | "compare" | "phonics" | "bubbles" | "done";
+type PlayableGameMode =
+  | "findit"
+  | "counting"
+  | "colors"
+  | "shapes"
+  | "math"
+  | "pattern"
+  | "compare"
+  | "phonics"
+  | "bubbles"
+  | "memory"
+  | "train"
+  | "words"
+  | "shapebuilder"
+  | "sort"
+  | "race"
+  | "oddone"
+  | "story";
+type GameMode = "menu" | PlayableGameMode | "done";
 
-type ProgressRecord = Record<GameMode, Record<Difficulty, number>>;
+type ProgressRecord = Record<PlayableGameMode, Record<Difficulty, number>>;
 type Achievement = {
   id: string;
   label: string;
   emoji: string;
   unlocked: boolean;
+};
+
+type GameProps = {
+  difficulty: Difficulty;
+  onComplete: (score: number, total: number) => void;
+  onBack: () => void;
+};
+
+type GameRegistryEntry = {
+  key: PlayableGameMode;
+  emoji: string;
+  title: string;
+  subtitle: string;
+  gradient: string;
+  bg: string;
+  total: (difficulty: Difficulty) => number;
+  component: (props: GameProps) => React.ReactElement;
+  achievement: {
+    id: string;
+    label: string;
+    emoji: string;
+  };
 };
 
 type PhonicsQuestion = {
@@ -38,7 +78,6 @@ type PhonicsQuestion = {
 
 const STORAGE_KEY = "toddler-site-progress-v2";
 const difficulties: Difficulty[] = ["easy", "medium", "hard"];
-const playableModes: GameMode[] = ["findit", "counting", "colors", "shapes", "math", "pattern", "compare", "phonics", "bubbles"];
 
 const difficultyLabels: Record<Difficulty, string> = {
   easy: "Easy",
@@ -50,34 +89,6 @@ const difficultyDescriptions: Record<Difficulty, string> = {
   easy: "Warm-up level",
   medium: "A little trickier",
   hard: "Challenge mode",
-};
-
-const modeEmoji: Record<GameMode, string> = {
-  menu: "🏠",
-  findit: "🔍",
-  counting: "🔢",
-  colors: "🎨",
-  shapes: "🔷",
-  math: "➕",
-  pattern: "🧩",
-  compare: "📏",
-  phonics: "📚",
-  bubbles: "🫧",
-  done: "🎉",
-};
-
-const modeTitles: Record<GameMode, string> = {
-  menu: "Menu",
-  findit: "Find It!",
-  counting: "Counting Fun",
-  colors: "Color Quiz",
-  shapes: "Shape Match",
-  math: "Math Fun",
-  pattern: "Pattern Fun",
-  compare: "Compare Numbers",
-  phonics: "Phonics Fun",
-  bubbles: "Bubble Pop",
-  done: "Done",
 };
 
 const phonicsQuestions: PhonicsQuestion[] = [
@@ -211,21 +222,30 @@ function getDefaultProgress(): ProgressRecord {
   return record;
 }
 
+function isPlayableMode(mode: GameMode): mode is PlayableGameMode {
+  return playableModes.includes(mode as PlayableGameMode);
+}
+
+function getGameTotal(mode: PlayableGameMode, difficulty: Difficulty) {
+  return gameRegistry.find((game) => game.key === mode)?.total(difficulty) ?? 8;
+}
+
+function getMasteryThreshold(mode: PlayableGameMode, difficulty: Difficulty) {
+  return Math.ceil(getGameTotal(mode, difficulty) * 0.75);
+}
+
 function getAchievementState(progress: ProgressRecord): Achievement[] {
-  const bestMath = Math.max(...difficulties.map((d) => progress.math[d] ?? 0));
-  const bestPattern = Math.max(...difficulties.map((d) => progress.pattern[d] ?? 0));
-  const bestCompare = Math.max(...difficulties.map((d) => progress.compare[d] ?? 0));
-  const bestPhonics = Math.max(...difficulties.map((d) => progress.phonics[d] ?? 0));
-  const bestBubbles = Math.max(...difficulties.map((d) => progress.bubbles?.[d] ?? 0));
-  const masteredGames = playableModes.filter((mode) => Object.values(progress[mode]).some((score) => score >= 8)).length;
+  const gameBadges = gameRegistry.map((game) => {
+    const unlocked = difficulties.some((level) => (progress[game.key]?.[level] ?? 0) >= getMasteryThreshold(game.key, level));
+    return { ...game.achievement, unlocked };
+  });
+  const masteredGames = playableModes.filter((mode) =>
+    difficulties.some((level) => (progress[mode]?.[level] ?? 0) >= getMasteryThreshold(mode, level))
+  ).length;
 
   return [
-    { id: "math-star", label: "Math Star", emoji: "➕", unlocked: bestMath >= 6 },
-    { id: "pattern-detective", label: "Pattern Detective", emoji: "🧩", unlocked: bestPattern >= 6 },
-    { id: "compare-captain", label: "Compare Captain", emoji: "📏", unlocked: bestCompare >= 6 },
-    { id: "reading-rockstar", label: "Reading Rockstar", emoji: "📚", unlocked: bestPhonics >= 6 },
-    { id: "bubble-master", label: "Bubble Master", emoji: "🫧", unlocked: bestBubbles >= 6 },
-    { id: "super-learner", label: "Super Learner", emoji: "🌟", unlocked: masteredGames >= 4 },
+    ...gameBadges,
+    { id: "super-learner", label: "Super Learner", emoji: "🌟", unlocked: masteredGames >= 6 },
   ];
 }
 
@@ -258,10 +278,17 @@ function getEncouragement(score: number, total: number) {
   return "Good try, let’s practice more!";
 }
 
-function getDifficultyMultiplier(difficulty: Difficulty) {
-  if (difficulty === "hard") return 3;
-  if (difficulty === "medium") return 2;
-  return 1;
+function buildNumericOptions(correct: number, min = 0, max = 20): number[] {
+  const options = new Set<number>([correct]);
+  for (const delta of [-2, -1, 1, 2, 3, -3]) {
+    const candidate = correct + delta;
+    if (candidate >= min && candidate <= max) options.add(candidate);
+    if (options.size >= 3) break;
+  }
+  while (options.size < 3) {
+    options.add(Math.floor(Math.random() * (max - min + 1)) + min);
+  }
+  return shuffle(Array.from(options).slice(0, 3));
 }
 
 function usePersistentProgress() {
@@ -270,7 +297,12 @@ function usePersistentProgress() {
     try {
       const raw = window.localStorage.getItem(STORAGE_KEY);
       if (!raw) return getDefaultProgress();
-      return { ...getDefaultProgress(), ...JSON.parse(raw) };
+      const saved = JSON.parse(raw) as Partial<ProgressRecord>;
+      const defaults = getDefaultProgress();
+      playableModes.forEach((mode) => {
+        defaults[mode] = { ...defaults[mode], ...(saved[mode] ?? {}) };
+      });
+      return defaults;
     } catch {
       return getDefaultProgress();
     }
@@ -302,7 +334,7 @@ export function App() {
     setLastGameScore(score);
     setLastGameTotal(total);
     setProgress((prev) => {
-      if (!playableModes.includes(mode)) return prev;
+      if (!isPlayableMode(mode)) return prev;
       const next = { ...prev, [mode]: { ...prev[mode] } };
       next[mode][difficulty] = Math.max(prev[mode][difficulty], score);
       return next;
@@ -324,33 +356,6 @@ export function App() {
       />
     );
   }
-  if (mode === "findit") {
-    return <FindItGame difficulty={difficulty} onComplete={handleGameComplete} onBack={() => setMode("menu")} />;
-  }
-  if (mode === "counting") {
-    return <CountingGame difficulty={difficulty} onComplete={handleGameComplete} onBack={() => setMode("menu")} />;
-  }
-  if (mode === "colors") {
-    return <ColorGame difficulty={difficulty} onComplete={handleGameComplete} onBack={() => setMode("menu")} />;
-  }
-  if (mode === "shapes") {
-    return <ShapeGame difficulty={difficulty} onComplete={handleGameComplete} onBack={() => setMode("menu")} />;
-  }
-  if (mode === "math") {
-    return <MathGame difficulty={difficulty} onComplete={handleGameComplete} onBack={() => setMode("menu")} />;
-  }
-  if (mode === "pattern") {
-    return <PatternGame difficulty={difficulty} onComplete={handleGameComplete} onBack={() => setMode("menu")} />;
-  }
-  if (mode === "compare") {
-    return <CompareGame difficulty={difficulty} onComplete={handleGameComplete} onBack={() => setMode("menu")} />;
-  }
-  if (mode === "phonics") {
-    return <PhonicsGame difficulty={difficulty} onComplete={handleGameComplete} onBack={() => setMode("menu")} />;
-  }
-  if (mode === "bubbles") {
-    return <BubblePopGame difficulty={difficulty} onComplete={handleGameComplete} onBack={() => setMode("menu")} />;
-  }
   if (mode === "done") {
     return (
       <DoneScreen
@@ -362,6 +367,15 @@ export function App() {
       />
     );
   }
+
+  if (isPlayableMode(mode)) {
+    const entry = gameRegistry.find((game) => game.key === mode);
+    if (entry) {
+      const GameComponent = entry.component;
+      return <GameComponent difficulty={difficulty} onComplete={handleGameComplete} onBack={() => setMode("menu")} />;
+    }
+  }
+
   return null;
 }
 
@@ -374,7 +388,7 @@ function MainMenu({
   progress,
   achievements,
 }: {
-  onSelect: (m: GameMode) => void;
+  onSelect: (m: PlayableGameMode) => void;
   totalScore: number;
   gamesPlayed: number;
   difficulty: Difficulty;
@@ -382,18 +396,6 @@ function MainMenu({
   progress: ProgressRecord;
   achievements: Achievement[];
 }) {
-  const games = [
-    { key: "findit" as GameMode, emoji: "🔍", title: "Find It!", subtitle: "Vocabulary and picture matching", gradient: "from-orange-400 to-pink-500", bg: "bg-orange-50" },
-    { key: "counting" as GameMode, emoji: "🔢", title: "Counting Fun", subtitle: "Count, group, and make 10", gradient: "from-blue-400 to-cyan-500", bg: "bg-blue-50" },
-    { key: "colors" as GameMode, emoji: "🎨", title: "Color Quiz", subtitle: "Colors, shades, and shape clues", gradient: "from-purple-400 to-pink-500", bg: "bg-purple-50" },
-    { key: "shapes" as GameMode, emoji: "🔷", title: "Shape Match", subtitle: "Names, sides, and real-world clues", gradient: "from-teal-400 to-emerald-500", bg: "bg-teal-50" },
-    { key: "math" as GameMode, emoji: "➕", title: "Math Fun", subtitle: "Add, subtract, and fill in the blank", gradient: "from-rose-400 to-red-500", bg: "bg-rose-50" },
-    { key: "pattern" as GameMode, emoji: "🧩", title: "Pattern Fun", subtitle: "AB, AAB, ABC, and more", gradient: "from-indigo-400 to-violet-500", bg: "bg-indigo-50" },
-    { key: "compare" as GameMode, emoji: "📏", title: "Compare Numbers", subtitle: "Greater, less, equal, and ordering", gradient: "from-amber-400 to-yellow-500", bg: "bg-amber-50" },
-    { key: "phonics" as GameMode, emoji: "📚", title: "Phonics Fun", subtitle: "Beginning sounds and rhymes", gradient: "from-lime-400 to-green-500", bg: "bg-lime-50" },
-    { key: "bubbles" as GameMode, emoji: "🫧", title: "Bubble Pop", subtitle: "Pop the letter bubbles!", gradient: "from-sky-400 to-blue-500", bg: "bg-sky-50" },
-  ];
-
   return (
     <div className="flex min-h-screen flex-col items-center justify-center bg-gradient-to-br from-yellow-100 via-pink-100 to-purple-200 px-4 py-8">
       <div className="w-full max-w-2xl text-center">
@@ -427,9 +429,10 @@ function MainMenu({
         )}
 
         <div className="mb-6 grid gap-4 md:grid-cols-2">
-          {games.map((game) => {
+          {gameRegistry.map((game) => {
             const best = progress[game.key][difficulty];
-            const stars = getStarRating(best, 8);
+            const total = game.total(difficulty);
+            const stars = getStarRating(best, total);
             return (
               <button
                 key={game.key}
@@ -442,7 +445,7 @@ function MainMenu({
                 <div className="min-w-0 flex-1 text-left">
                   <h2 className="text-xl font-extrabold text-gray-700">{game.title}</h2>
                   <p className="text-sm font-medium text-gray-400">{game.subtitle}</p>
-                  <p className="mt-1 text-xs font-bold text-purple-400">Best on {difficultyLabels[difficulty]}: {best}/8</p>
+                  <p className="mt-1 text-xs font-bold text-purple-400">Best on {difficultyLabels[difficulty]}: {best}/{total}</p>
                 </div>
                 <div className="text-right">
                   <div className="text-lg">{"⭐".repeat(stars)}{stars === 0 ? "☆" : ""}</div>
@@ -621,19 +624,24 @@ function FindItGame({ onComplete, onBack, difficulty }: { onComplete: (score: nu
   );
 }
 
-function buildCountingQuestions(difficulty: Difficulty) {
+type BuiltCountingQuestion = CountingQuestion & {
+  questionType?: "make10";
+  target?: number;
+};
+
+function buildCountingQuestions(difficulty: Difficulty): BuiltCountingQuestion[] {
   const questions = generateCountingQuestions();
   return questions.map((q, index) => {
     if (difficulty === "easy") {
       const count = Math.min(q.count, 5);
-      return { ...q, count, options: shuffle([count, Math.max(1, count - 1), Math.min(10, count + 1)]) };
+      return { ...q, count, options: buildNumericOptions(count, 1, 10) };
     }
     if (difficulty === "medium") {
       return q;
     }
     if (index % 2 === 0) {
       const count = Math.min(q.count + 2, 10);
-      return { ...q, count, options: shuffle([count, Math.max(1, count - 2), Math.min(10, count + 1)]) };
+      return { ...q, count, options: buildNumericOptions(count, 1, 10) };
     }
     const answer = 10 - q.count;
     return {
@@ -641,14 +649,14 @@ function buildCountingQuestions(difficulty: Difficulty) {
       count: q.count,
       target: 10,
       questionType: "make10" as const,
-      options: shuffle([answer, Math.max(1, answer - 1), Math.min(10, answer + 2)]),
+      options: buildNumericOptions(answer, 1, 10),
     };
   });
 }
 
 function CountingGame({ onComplete, onBack, difficulty }: { onComplete: (score: number, total: number) => void; onBack: () => void; difficulty: Difficulty }) {
   const TOTAL = 8;
-  const [questions] = useState<any[]>(() => buildCountingQuestions(difficulty).slice(0, TOTAL));
+  const [questions] = useState<BuiltCountingQuestion[]>(() => buildCountingQuestions(difficulty).slice(0, TOTAL));
   const [current, setCurrent] = useState(0);
   const [score, setScore] = useState(0);
   const [selected, setSelected] = useState<number | null>(null);
@@ -832,26 +840,42 @@ function ShapeGame({ onComplete, onBack, difficulty }: { onComplete: (score: num
   );
 }
 
-function buildMathQuestions(difficulty: Difficulty) {
+type BuiltMathQuestion = MathQuestion & {
+  questionType?: "missing";
+  display?: string;
+};
+
+function buildMathQuestions(difficulty: Difficulty): BuiltMathQuestion[] {
   const all = generateMathQuestions();
   if (difficulty === "easy") {
-    return all.map((q) => ({ ...q, num1: Math.min(q.num1, 5), num2: Math.min(q.num2, 4), answer: q.operator === "+" ? Math.min(q.num1, 5) + Math.min(q.num2, 4) : Math.max(Math.min(q.num1, 5) - Math.min(q.num2, 4), 0), options: shuffle([q.answer, Math.max(0, q.answer - 1), q.answer + 1]) }));
+    return all.map((q) => {
+      const num2 = Math.min(q.num2, 4);
+      const num1 = q.operator === "+" ? Math.min(q.num1, 5) : Math.max(num2 + 1, Math.min(q.num1, 6));
+      const answer = q.operator === "+" ? num1 + num2 : num1 - num2;
+      return { ...q, num1, num2, answer, options: buildNumericOptions(answer, 0, 12) };
+    });
   }
   if (difficulty === "hard") {
-    return all.map((q, i) => i % 3 === 0 ? { ...q, questionType: "missing" as const, answer: q.num2, display: `${q.num1} ${q.operator} ? = ${q.operator === "+" ? q.num1 + q.num2 : q.num1 - q.num2}` } : q);
+    return all.map((q, i) => i % 3 === 0 ? {
+      ...q,
+      questionType: "missing" as const,
+      answer: q.num2,
+      display: `${q.num1} ${q.operator} ? = ${q.operator === "+" ? q.num1 + q.num2 : q.num1 - q.num2}`,
+      options: buildNumericOptions(q.num2, 0, 12),
+    } : q);
   }
   return all;
 }
 
 function MathGame({ onComplete, onBack, difficulty }: { onComplete: (score: number, total: number) => void; onBack: () => void; difficulty: Difficulty }) {
   const TOTAL = 8;
-  const [questions] = useState<any[]>(() => buildMathQuestions(difficulty).slice(0, TOTAL));
+  const [questions] = useState<BuiltMathQuestion[]>(() => buildMathQuestions(difficulty).slice(0, TOTAL));
   const [current, setCurrent] = useState(0);
   const [score, setScore] = useState(0);
   const [selected, setSelected] = useState<number | null>(null);
   const [isCorrect, setIsCorrect] = useState<boolean | null>(null);
   const question = questions[current];
-  const answer = question.questionType === "missing" ? question.answer : question.answer;
+  const answer = question.answer;
 
   function handleSelect(option: number) {
     if (selected !== null) return;
@@ -872,7 +896,7 @@ function MathGame({ onComplete, onBack, difficulty }: { onComplete: (score: numb
     }, 1500);
   }
 
-  const options = question.questionType === "missing" ? shuffle([answer, Math.max(0, answer - 1), answer + 2]) : question.options;
+  const options = question.options;
   const display = question.questionType === "missing" ? question.display : `${question.num1} ${question.operator} ${question.num2} = ?`;
 
   return (
@@ -899,13 +923,23 @@ function MathGame({ onComplete, onBack, difficulty }: { onComplete: (score: numb
 
 function buildPatternQuestions(difficulty: Difficulty) {
   const all = generatePatternQuestions();
-  if (difficulty === "easy") return all.filter((q) => q.pattern.length <= 4);
+  const easyPatterns: PatternQuestion[] = [
+    { pattern: ["🔴", "🔵", "🔴"], answer: "🔵", options: ["🔵", "🔴", "🟢"] },
+    { pattern: ["⭐", "🌙", "⭐"], answer: "🌙", options: ["🌙", "⭐", "☀️"] },
+    { pattern: ["🍎", "🍌", "🍎"], answer: "🍌", options: ["🍌", "🍎", "🍊"] },
+    { pattern: ["🐱", "🐶", "🐱"], answer: "🐶", options: ["🐶", "🐱", "🐰"] },
+    { pattern: ["🌸", "🌻", "🌸"], answer: "🌻", options: ["🌻", "🌸", "🌼"] },
+    { pattern: ["🟢", "🟡", "🟢"], answer: "🟡", options: ["🟡", "🟢", "🔴"] },
+    { pattern: ["🎈", "🎁", "🎈"], answer: "🎁", options: ["🎁", "🎈", "🎀"] },
+    { pattern: ["🦋", "🐛", "🦋"], answer: "🐛", options: ["🐛", "🦋", "🐝"] },
+  ];
+  if (difficulty === "easy") return shuffle(easyPatterns);
   if (difficulty === "medium") return all;
-  return all.concat([
+  return shuffle([...all, ...([
     { pattern: ["🔴", "🔴", "🔵", "🔴", "🔴"], answer: "🔵", options: ["🔵", "🟢", "🟡"] },
     { pattern: ["⭐", "🌙", "☀️", "⭐", "🌙"], answer: "☀️", options: ["☀️", "⭐", "🌙"] },
     { pattern: ["🟩", "🟨", "🟩", "🟨", "🟩"], answer: "🟨", options: ["🟨", "🟩", "🟥"] },
-  ]);
+  ] satisfies PatternQuestion[])]);
 }
 
 function PatternGame({ onComplete, onBack, difficulty }: { onComplete: (score: number, total: number) => void; onBack: () => void; difficulty: Difficulty }) {
@@ -963,13 +997,23 @@ function PatternGame({ onComplete, onBack, difficulty }: { onComplete: (score: n
 
 function buildCompareQuestions(difficulty: Difficulty) {
   const all = generateCompareQuestions();
-  if (difficulty === "easy") return all.filter((q) => q.valueA < 20 && q.valueB < 20);
+  if (difficulty === "easy") {
+    const questions: CompareQuestion[] = [];
+    for (let i = 0; i < 8; i++) {
+      const valueA = Math.floor(Math.random() * 18) + 1;
+      let valueB = Math.floor(Math.random() * 18) + 1;
+      if (i === 3) valueB = valueA;
+      const answer: ">" | "<" | "=" = valueA > valueB ? ">" : valueA < valueB ? "<" : "=";
+      questions.push({ labelA: `${valueA}`, valueA, labelB: `${valueB}`, valueB, answer, type: "numbers" });
+    }
+    return shuffle(questions);
+  }
   if (difficulty === "medium") return all;
-  return all.concat([
+  return shuffle([...all, ...([
     { labelA: "18 + 3", valueA: 21, labelB: "20", valueB: 20, answer: ">", type: "expression" },
     { labelA: "27", valueA: 27, labelB: "14 + 13", valueB: 27, answer: "=", type: "expression" },
     { labelA: "32", valueA: 32, labelB: "19 + 9", valueB: 28, answer: ">", type: "expression" },
-  ]);
+  ] satisfies CompareQuestion[])]);
 }
 
 function CompareGame({ onComplete, onBack, difficulty }: { onComplete: (score: number, total: number) => void; onBack: () => void; difficulty: Difficulty }) {
@@ -1443,3 +1487,763 @@ function BubblePopGame({
     </GameWrapper>
   );
 }
+
+// ============ MEMORY MATCH ============
+
+type MemoryCard = {
+  id: string;
+  matchId: string;
+  emoji: string;
+};
+
+const memoryItems = ["🍎", "⭐", "🐟", "🦋", "🌸", "🎈", "🚗", "🐶", "🌙", "🍕", "🎂", "🌈"];
+
+function getMemoryPairCount(difficulty: Difficulty) {
+  if (difficulty === "easy") return 4;
+  if (difficulty === "medium") return 6;
+  return 8;
+}
+
+function buildMemoryCards(difficulty: Difficulty): MemoryCard[] {
+  const pairs = shuffle(memoryItems).slice(0, getMemoryPairCount(difficulty));
+  return shuffle(pairs.flatMap((emoji, pairIndex) => [
+    { id: `${pairIndex}-a`, matchId: `${pairIndex}`, emoji },
+    { id: `${pairIndex}-b`, matchId: `${pairIndex}`, emoji },
+  ]));
+}
+
+function MemoryMatchGame({ onComplete, onBack, difficulty }: GameProps) {
+  const TOTAL = getMemoryPairCount(difficulty);
+  const [cards] = useState<MemoryCard[]>(() => buildMemoryCards(difficulty));
+  const [flipped, setFlipped] = useState<string[]>([]);
+  const [matched, setMatched] = useState<string[]>([]);
+  const [score, setScore] = useState(0);
+  const [locked, setLocked] = useState(false);
+
+  function handleFlip(card: MemoryCard) {
+    if (locked || flipped.includes(card.id) || matched.includes(card.id)) return;
+    const nextFlipped = [...flipped, card.id];
+    setFlipped(nextFlipped);
+    if (nextFlipped.length < 2) return;
+
+    setLocked(true);
+    const first = cards.find((candidate) => candidate.id === nextFlipped[0]);
+    const isMatch = first?.matchId === card.matchId;
+    if (isMatch) {
+      const nextScore = score + 1;
+      setMatched((currentMatched) => [...currentMatched, ...nextFlipped]);
+      setScore(nextScore);
+      fireConfetti();
+      setTimeout(() => {
+        setFlipped([]);
+        setLocked(false);
+        if (nextScore >= TOTAL) onComplete(nextScore, TOTAL);
+      }, 850);
+    } else {
+      setTimeout(() => {
+        setFlipped([]);
+        setLocked(false);
+      }, 950);
+    }
+  }
+
+  return (
+    <GameWrapper title="Memory Match" emoji="🧠" current={Math.min(score, TOTAL - 1)} total={TOTAL} score={score} onBack={onBack} bgGradient="bg-gradient-to-br from-fuchsia-50 via-pink-50 to-rose-100" difficulty={difficulty}>
+      <div className="w-full rounded-3xl bg-white p-5 shadow-2xl sm:p-7">
+        <div className="mb-4 text-center">
+          <h2 className="text-2xl font-extrabold text-fuchsia-600 sm:text-3xl">Find the matching pairs</h2>
+          <p className="mt-1 text-sm font-semibold text-fuchsia-300">{difficulty === "hard" ? "More cards are hiding now." : "Tap two cards and remember what you saw."}</p>
+        </div>
+        <div className={`grid gap-3 ${difficulty === "easy" ? "grid-cols-4" : "grid-cols-4"}`}>
+          {cards.map((card) => {
+            const isVisible = flipped.includes(card.id) || matched.includes(card.id);
+            const isMatched = matched.includes(card.id);
+            return (
+              <button
+                key={card.id}
+                onClick={() => handleFlip(card)}
+                className={`flex aspect-square items-center justify-center rounded-2xl border-4 text-4xl font-black shadow-md transition-all duration-200 cursor-pointer sm:text-5xl ${isVisible ? isMatched ? "border-green-300 bg-green-50 scale-[1.03]" : "border-fuchsia-300 bg-fuchsia-50" : "border-fuchsia-200 bg-gradient-to-br from-fuchsia-400 to-pink-500 text-white hover:scale-[1.04]"}`}
+              >
+                {isVisible ? card.emoji : "?"}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </GameWrapper>
+  );
+}
+
+// ============ NUMBER TRAIN ============
+
+type TrainRound = {
+  prompt: string;
+  numbers: number[];
+  answer: number[];
+};
+
+function buildTrainRounds(difficulty: Difficulty): TrainRound[] {
+  return Array.from({ length: 8 }, (_, index) => {
+    const carCount = difficulty === "easy" ? 3 : difficulty === "medium" ? 4 : 5;
+    const max = difficulty === "easy" ? 12 : difficulty === "medium" ? 30 : 60;
+    const numbers = new Set<number>();
+    while (numbers.size < carCount) {
+      const base = difficulty === "hard" && index % 2 === 0 ? Math.floor(Math.random() * 12) * 5 + 5 : Math.floor(Math.random() * max) + 1;
+      numbers.add(base);
+    }
+    const answer = Array.from(numbers).sort((a, b) => a - b);
+    return {
+      prompt: difficulty === "hard" ? "Build the train from smallest to biggest." : "Tap the cars in number order.",
+      numbers: shuffle(answer),
+      answer,
+    };
+  });
+}
+
+function NumberTrainGame({ onComplete, onBack, difficulty }: GameProps) {
+  const TOTAL = 8;
+  const [rounds] = useState<TrainRound[]>(() => buildTrainRounds(difficulty));
+  const [current, setCurrent] = useState(0);
+  const [score, setScore] = useState(0);
+  const [placed, setPlaced] = useState<number[]>([]);
+  const [isCorrect, setIsCorrect] = useState<boolean | null>(null);
+  const round = rounds[current];
+  const available = round.numbers.filter((number) => !placed.includes(number));
+
+  function advance(correct: boolean) {
+    setTimeout(() => {
+      if (current + 1 >= TOTAL) onComplete(score + (correct ? 1 : 0), TOTAL);
+      else {
+        setCurrent((value) => value + 1);
+        setPlaced([]);
+        setIsCorrect(null);
+      }
+    }, 1400);
+  }
+
+  function handlePick(number: number) {
+    if (isCorrect !== null) return;
+    const nextPlaced = [...placed, number];
+    setPlaced(nextPlaced);
+    if (nextPlaced.length === round.answer.length) {
+      const correct = nextPlaced.every((value, index) => value === round.answer[index]);
+      setIsCorrect(correct);
+      if (correct) {
+        setScore((value) => value + 1);
+        fireConfetti();
+      }
+      advance(correct);
+    }
+  }
+
+  return (
+    <GameWrapper title="Number Train" emoji="🚂" current={current} total={TOTAL} score={score} onBack={onBack} bgGradient="bg-gradient-to-br from-cyan-50 via-blue-50 to-indigo-100" difficulty={difficulty}>
+      <div className="w-full rounded-3xl bg-white p-5 shadow-2xl sm:p-7">
+        <div className="mb-4 text-center">
+          <h2 className="text-2xl font-extrabold text-blue-600 sm:text-3xl">{round.prompt}</h2>
+          <p className="mt-1 text-sm font-semibold text-blue-300">Fill each car from left to right.</p>
+        </div>
+        <div className="mb-5 flex items-center justify-center gap-2 rounded-2xl bg-blue-50 p-4">
+          <span className="text-4xl">🚂</span>
+          {round.answer.map((_, index) => (
+            <div key={index} className={`flex h-16 w-16 items-center justify-center rounded-xl border-4 text-2xl font-black sm:h-20 sm:w-20 sm:text-3xl ${isCorrect === false ? "border-red-300 bg-red-50 text-red-500" : "border-blue-300 bg-white text-blue-700"}`}>
+              {placed[index] ?? ""}
+            </div>
+          ))}
+        </div>
+        <div className="grid grid-cols-3 gap-3 sm:grid-cols-5">
+          {available.map((number) => (
+            <button key={number} onClick={() => handlePick(number)} className="rounded-2xl border-4 border-cyan-300 bg-cyan-50 p-4 text-3xl font-black text-cyan-700 shadow-md transition-transform hover:scale-[1.04] active:scale-95 cursor-pointer">
+              {number}
+            </button>
+          ))}
+        </div>
+        {isCorrect !== null && <p className={`mt-5 text-center text-2xl font-extrabold ${isCorrect ? "text-green-500" : "text-blue-500"}`}>{isCorrect ? "🎉 Train is ready!" : `Order: ${round.answer.join(", ")}`}</p>}
+      </div>
+    </GameWrapper>
+  );
+}
+
+// ============ WORD BUILDER ============
+
+type WordRound = {
+  word: string;
+  emoji: string;
+  hint: string;
+  tiles: { id: string; letter: string }[];
+};
+
+const wordBank = [
+  { word: "CAT", emoji: "🐱", hint: "A pet that says meow." },
+  { word: "DOG", emoji: "🐶", hint: "A pet that says woof." },
+  { word: "SUN", emoji: "☀️", hint: "It shines in the sky." },
+  { word: "HAT", emoji: "🎩", hint: "You wear it on your head." },
+  { word: "LOG", emoji: "🪵", hint: "A piece of a tree." },
+  { word: "BUG", emoji: "🐞", hint: "A tiny crawling animal." },
+  { word: "BUS", emoji: "🚌", hint: "It carries people around town." },
+  { word: "BED", emoji: "🛏️", hint: "You sleep in it." },
+  { word: "FISH", emoji: "🐟", hint: "It swims in water." },
+  { word: "MOON", emoji: "🌙", hint: "You see it at night." },
+  { word: "TREE", emoji: "🌲", hint: "It has leaves." },
+  { word: "BALL", emoji: "⚽", hint: "You can kick or throw it." },
+  { word: "CAKE", emoji: "🎂", hint: "A birthday treat." },
+  { word: "STAR", emoji: "⭐", hint: "It twinkles." },
+  { word: "BIRD", emoji: "🐦", hint: "It can fly." },
+  { word: "RAIN", emoji: "🌧️", hint: "Water from clouds." },
+  { word: "BOOK", emoji: "📘", hint: "You read it." },
+];
+
+function getWordRoundTotal(difficulty: Difficulty) {
+  return difficulty === "hard" ? 10 : 8;
+}
+
+function buildWordRounds(difficulty: Difficulty): WordRound[] {
+  const maxLength = difficulty === "easy" ? 3 : difficulty === "medium" ? 4 : 5;
+  return shuffle(wordBank)
+    .filter((entry) => entry.word.length <= maxLength)
+    .slice(0, getWordRoundTotal(difficulty))
+    .map((entry) => ({
+      ...entry,
+      tiles: shuffle(entry.word.split("").map((letter, index) => ({ id: `${entry.word}-${index}`, letter }))),
+    }));
+}
+
+function WordBuilderGame({ onComplete, onBack, difficulty }: GameProps) {
+  const TOTAL = getWordRoundTotal(difficulty);
+  const [rounds] = useState<WordRound[]>(() => buildWordRounds(difficulty));
+  const [current, setCurrent] = useState(0);
+  const [score, setScore] = useState(0);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [isCorrect, setIsCorrect] = useState<boolean | null>(null);
+  const round = rounds[current];
+  const selectedLetters = selectedIds.map((id) => round.tiles.find((tile) => tile.id === id)?.letter ?? "");
+
+  function complete(nextIds: string[]) {
+    const word = nextIds.map((id) => round.tiles.find((tile) => tile.id === id)?.letter ?? "").join("");
+    const correct = word === round.word;
+    setIsCorrect(correct);
+    if (correct) {
+      setScore((value) => value + 1);
+      fireConfetti();
+    }
+    setTimeout(() => {
+      if (current + 1 >= TOTAL) onComplete(score + (correct ? 1 : 0), TOTAL);
+      else {
+        setCurrent((value) => value + 1);
+        setSelectedIds([]);
+        setIsCorrect(null);
+      }
+    }, 1500);
+  }
+
+  function handleTile(tileId: string) {
+    if (isCorrect !== null || selectedIds.includes(tileId)) return;
+    const nextIds = [...selectedIds, tileId];
+    setSelectedIds(nextIds);
+    if (nextIds.length === round.word.length) complete(nextIds);
+  }
+
+  return (
+    <GameWrapper title="Word Builder" emoji="🔤" current={current} total={TOTAL} score={score} onBack={onBack} bgGradient="bg-gradient-to-br from-emerald-50 via-lime-50 to-yellow-100" difficulty={difficulty}>
+      <div className="w-full rounded-3xl bg-white p-5 shadow-2xl sm:p-7">
+        <div className="mb-4 text-center">
+          <div className="text-7xl">{round.emoji}</div>
+          <h2 className="mt-2 text-2xl font-extrabold text-emerald-600 sm:text-3xl">Build the word</h2>
+          <p className="mt-1 text-sm font-semibold text-emerald-300">{round.hint}</p>
+        </div>
+        <div className="mb-5 flex justify-center gap-2">
+          {round.word.split("").map((_, index) => (
+            <div key={index} className={`flex h-16 w-14 items-center justify-center rounded-xl border-4 text-3xl font-black sm:h-20 sm:w-16 sm:text-4xl ${isCorrect === false ? "border-red-300 bg-red-50 text-red-500" : "border-emerald-300 bg-emerald-50 text-emerald-700"}`}>
+              {selectedLetters[index] ?? ""}
+            </div>
+          ))}
+        </div>
+        <div className="flex flex-wrap justify-center gap-3">
+          {round.tiles.map((tile) => (
+            <button key={tile.id} onClick={() => handleTile(tile.id)} disabled={selectedIds.includes(tile.id) || isCorrect !== null} className={`flex h-16 w-16 items-center justify-center rounded-2xl border-4 text-3xl font-black shadow-md transition-transform cursor-pointer sm:h-20 sm:w-20 sm:text-4xl ${selectedIds.includes(tile.id) ? "border-gray-200 bg-gray-100 text-gray-300" : "border-lime-300 bg-lime-50 text-lime-700 hover:scale-[1.04] active:scale-95"}`}>
+              {tile.letter}
+            </button>
+          ))}
+        </div>
+        {isCorrect !== null && <p className={`mt-5 text-center text-2xl font-extrabold ${isCorrect ? "text-green-500" : "text-emerald-500"}`}>{isCorrect ? "🎉 You built it!" : `It spells ${round.word}.`}</p>}
+      </div>
+    </GameWrapper>
+  );
+}
+
+// ============ SHAPE BUILDER ============
+
+type ShapeBuildRound = {
+  picture: string;
+  emoji: string;
+  pieces: string[];
+  options: string[];
+};
+
+const shapePieceIcons: Record<string, string> = {
+  Circle: "●",
+  Square: "■",
+  Triangle: "▲",
+  Rectangle: "▬",
+  Star: "★",
+  Diamond: "◆",
+  Oval: "⬮",
+  Heart: "♥",
+};
+
+const shapeBuildBank: ShapeBuildRound[] = [
+  { picture: "House", emoji: "🏠", pieces: ["Square", "Triangle"], options: [] },
+  { picture: "Rocket", emoji: "🚀", pieces: ["Rectangle", "Triangle", "Circle"], options: [] },
+  { picture: "Flower", emoji: "🌸", pieces: ["Circle", "Oval", "Heart"], options: [] },
+  { picture: "Robot", emoji: "🤖", pieces: ["Square", "Rectangle", "Circle"], options: [] },
+  { picture: "Fish", emoji: "🐟", pieces: ["Oval", "Triangle", "Circle"], options: [] },
+  { picture: "Kite", emoji: "🪁", pieces: ["Diamond", "Triangle"], options: [] },
+  { picture: "Castle", emoji: "🏰", pieces: ["Square", "Rectangle", "Triangle"], options: [] },
+  { picture: "Badge", emoji: "🏅", pieces: ["Circle", "Star", "Rectangle"], options: [] },
+];
+
+function buildShapeBuilderRounds(difficulty: Difficulty): ShapeBuildRound[] {
+  const extras = Object.keys(shapePieceIcons);
+  return shuffle(shapeBuildBank).map((round) => {
+    const extraCount = difficulty === "easy" ? 1 : difficulty === "medium" ? 2 : 3;
+    const distractors = shuffle(extras.filter((shape) => !round.pieces.includes(shape))).slice(0, extraCount);
+    return { ...round, options: shuffle([...round.pieces, ...distractors]) };
+  });
+}
+
+function ShapeBuilderGame({ onComplete, onBack, difficulty }: GameProps) {
+  const TOTAL = 8;
+  const [rounds] = useState<ShapeBuildRound[]>(() => buildShapeBuilderRounds(difficulty).slice(0, TOTAL));
+  const [current, setCurrent] = useState(0);
+  const [score, setScore] = useState(0);
+  const [selected, setSelected] = useState<string[]>([]);
+  const [isCorrect, setIsCorrect] = useState<boolean | null>(null);
+  const round = rounds[current];
+
+  function handleShape(shape: string) {
+    if (isCorrect !== null || selected.includes(shape)) return;
+    const nextSelected = [...selected, shape];
+    setSelected(nextSelected);
+    if (nextSelected.length === round.pieces.length) {
+      const correct = round.pieces.every((piece) => nextSelected.includes(piece));
+      setIsCorrect(correct);
+      if (correct) {
+        setScore((value) => value + 1);
+        fireConfetti();
+      }
+      setTimeout(() => {
+        if (current + 1 >= TOTAL) onComplete(score + (correct ? 1 : 0), TOTAL);
+        else {
+          setCurrent((value) => value + 1);
+          setSelected([]);
+          setIsCorrect(null);
+        }
+      }, 1500);
+    }
+  }
+
+  return (
+    <GameWrapper title="Shape Builder" emoji="🧱" current={current} total={TOTAL} score={score} onBack={onBack} bgGradient="bg-gradient-to-br from-teal-50 via-cyan-50 to-blue-100" difficulty={difficulty}>
+      <div className="w-full rounded-3xl bg-white p-5 shadow-2xl sm:p-7">
+        <div className="mb-4 text-center">
+          <div className="text-7xl">{round.emoji}</div>
+          <h2 className="mt-2 text-2xl font-extrabold text-teal-600 sm:text-3xl">Build a {round.picture}</h2>
+          <p className="mt-1 text-sm font-semibold text-teal-300">Pick the shapes it needs.</p>
+        </div>
+        <div className="mb-5 flex min-h-[84px] flex-wrap justify-center gap-3 rounded-2xl bg-teal-50 p-4">
+          {round.pieces.map((_, index) => (
+            <div key={index} className={`flex h-16 w-16 items-center justify-center rounded-xl border-4 text-4xl ${isCorrect === false ? "border-red-300 bg-red-50 text-red-500" : "border-teal-300 bg-white text-teal-700"}`}>
+              {selected[index] ? shapePieceIcons[selected[index]] : ""}
+            </div>
+          ))}
+        </div>
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+          {round.options.map((shape) => (
+            <button key={shape} onClick={() => handleShape(shape)} disabled={selected.includes(shape) || isCorrect !== null} className={`rounded-2xl border-4 p-3 text-center shadow-md transition-transform cursor-pointer ${selected.includes(shape) ? "border-gray-200 bg-gray-100 text-gray-300" : "border-cyan-300 bg-cyan-50 text-cyan-700 hover:scale-[1.03] active:scale-95"}`}>
+              <div className="text-4xl leading-none">{shapePieceIcons[shape]}</div>
+              <div className="mt-1 text-sm font-extrabold">{shape}</div>
+            </button>
+          ))}
+        </div>
+        {isCorrect !== null && <p className={`mt-5 text-center text-2xl font-extrabold ${isCorrect ? "text-green-500" : "text-teal-500"}`}>{isCorrect ? "🎉 Picture built!" : `Use ${round.pieces.join(", ")}.`}</p>}
+      </div>
+    </GameWrapper>
+  );
+}
+
+// ============ TREASURE SORT ============
+
+type SortItem = {
+  label: string;
+  emoji: string;
+  color: string;
+  group: string;
+  first: string;
+};
+
+type SortRound = {
+  item: SortItem;
+  rule: "color" | "group" | "first";
+  bins: string[];
+  answer: string;
+};
+
+const sortItems: SortItem[] = [
+  { label: "Apple", emoji: "🍎", color: "Red", group: "Food", first: "A" },
+  { label: "Ball", emoji: "⚽", color: "Black", group: "Toy", first: "B" },
+  { label: "Car", emoji: "🚗", color: "Red", group: "Toy", first: "C" },
+  { label: "Sun", emoji: "☀️", color: "Yellow", group: "Nature", first: "S" },
+  { label: "Tree", emoji: "🌲", color: "Green", group: "Nature", first: "T" },
+  { label: "Cake", emoji: "🎂", color: "Pink", group: "Food", first: "C" },
+  { label: "Book", emoji: "📘", color: "Blue", group: "School", first: "B" },
+  { label: "Pencil", emoji: "✏️", color: "Yellow", group: "School", first: "P" },
+  { label: "Fish", emoji: "🐟", color: "Blue", group: "Animal", first: "F" },
+  { label: "Dog", emoji: "🐶", color: "Brown", group: "Animal", first: "D" },
+];
+
+function buildSortRounds(difficulty: Difficulty): SortRound[] {
+  return shuffle(sortItems).slice(0, 8).map((item, index) => {
+    const rule: SortRound["rule"] = difficulty === "easy" ? "color" : difficulty === "medium" ? "group" : index % 2 === 0 ? "first" : "group";
+    const answer = item[rule];
+    const allBins = Array.from(new Set(sortItems.map((candidate) => candidate[rule])));
+    return { item, rule, answer, bins: shuffle([answer, ...shuffle(allBins.filter((bin) => bin !== answer)).slice(0, difficulty === "easy" ? 1 : 2)]) };
+  });
+}
+
+function TreasureSortGame({ onComplete, onBack, difficulty }: GameProps) {
+  const TOTAL = 8;
+  const [rounds] = useState<SortRound[]>(() => buildSortRounds(difficulty));
+  const [current, setCurrent] = useState(0);
+  const [score, setScore] = useState(0);
+  const [selected, setSelected] = useState<string | null>(null);
+  const [isCorrect, setIsCorrect] = useState<boolean | null>(null);
+  const round = rounds[current];
+  const ruleLabel = round.rule === "first" ? "first letter" : round.rule;
+
+  function handleBin(bin: string) {
+    if (selected) return;
+    setSelected(bin);
+    const correct = bin === round.answer;
+    setIsCorrect(correct);
+    if (correct) {
+      setScore((value) => value + 1);
+      fireConfetti();
+    }
+    setTimeout(() => {
+      if (current + 1 >= TOTAL) onComplete(score + (correct ? 1 : 0), TOTAL);
+      else {
+        setCurrent((value) => value + 1);
+        setSelected(null);
+        setIsCorrect(null);
+      }
+    }, 1400);
+  }
+
+  return (
+    <GameWrapper title="Treasure Sort" emoji="🧺" current={current} total={TOTAL} score={score} onBack={onBack} bgGradient="bg-gradient-to-br from-orange-50 via-amber-50 to-yellow-100" difficulty={difficulty}>
+      <div className="w-full rounded-3xl bg-white p-5 shadow-2xl sm:p-7">
+        <div className="mb-5 text-center">
+          <div className="text-7xl">{round.item.emoji}</div>
+          <h2 className="mt-2 text-2xl font-extrabold text-orange-600 sm:text-3xl">Sort the {round.item.label}</h2>
+          <p className="mt-1 text-sm font-semibold text-orange-300">Choose the matching {ruleLabel} bin.</p>
+        </div>
+        <div className="grid gap-3 sm:grid-cols-3">
+          {round.bins.map((bin) => {
+            let style = "border-amber-300 bg-amber-50 text-amber-700 hover:scale-[1.03]";
+            if (selected) {
+              if (bin === round.answer) style = "border-green-400 bg-green-100 text-green-700 scale-[1.03]";
+              else if (bin === selected && !isCorrect) style = "border-red-300 bg-red-100 text-red-500 animate-[shake_0.4s_ease-in-out]";
+              else style = "border-gray-200 bg-gray-100 text-gray-400";
+            }
+            return <button key={bin} onClick={() => handleBin(bin)} disabled={!!selected} className={`rounded-2xl border-4 p-5 text-xl font-extrabold shadow-md transition-transform cursor-pointer ${style}`}>{bin}</button>;
+          })}
+        </div>
+        {selected && <p className={`mt-5 text-center text-2xl font-extrabold ${isCorrect ? "text-green-500" : "text-orange-500"}`}>{isCorrect ? "🎉 Sorted!" : `It goes in ${round.answer}.`}</p>}
+      </div>
+    </GameWrapper>
+  );
+}
+
+// ============ MATH RACE ============
+
+type RaceRound = {
+  expression: string;
+  answer: number;
+  options: number[];
+};
+
+function buildRaceRounds(difficulty: Difficulty): RaceRound[] {
+  return Array.from({ length: 8 }, () => {
+    const max = difficulty === "easy" ? 6 : difficulty === "medium" ? 10 : 15;
+    const useSubtraction = difficulty !== "easy" && Math.random() > 0.55;
+    let left = Math.floor(Math.random() * max) + 1;
+    let right = Math.floor(Math.random() * max) + 1;
+    if (useSubtraction && right > left) [left, right] = [right, left];
+    const answer = useSubtraction ? left - right : left + right;
+    return {
+      expression: `${left} ${useSubtraction ? "−" : "+"} ${right}`,
+      answer,
+      options: buildNumericOptions(answer, 0, 30),
+    };
+  });
+}
+
+function MathRaceGame({ onComplete, onBack, difficulty }: GameProps) {
+  const TOTAL = 8;
+  const [rounds] = useState<RaceRound[]>(() => buildRaceRounds(difficulty));
+  const [current, setCurrent] = useState(0);
+  const [score, setScore] = useState(0);
+  const [selected, setSelected] = useState<number | null>(null);
+  const [isCorrect, setIsCorrect] = useState<boolean | null>(null);
+  const round = rounds[current];
+
+  function handleAnswer(option: number) {
+    if (selected !== null) return;
+    setSelected(option);
+    const correct = option === round.answer;
+    setIsCorrect(correct);
+    if (correct) {
+      setScore((value) => value + 1);
+      fireConfetti();
+    }
+    setTimeout(() => {
+      if (current + 1 >= TOTAL) onComplete(score + (correct ? 1 : 0), TOTAL);
+      else {
+        setCurrent((value) => value + 1);
+        setSelected(null);
+        setIsCorrect(null);
+      }
+    }, 1400);
+  }
+
+  return (
+    <GameWrapper title="Math Race" emoji="🏎️" current={current} total={TOTAL} score={score} onBack={onBack} bgGradient="bg-gradient-to-br from-red-50 via-orange-50 to-yellow-100" difficulty={difficulty}>
+      <div className="w-full rounded-3xl bg-white p-5 shadow-2xl sm:p-7">
+        <div className="mb-5 rounded-2xl bg-orange-50 p-4">
+          <div className="mb-3 grid grid-cols-8 gap-1">
+            {Array.from({ length: TOTAL }, (_, index) => (
+              <div key={index} className={`flex h-10 items-center justify-center rounded-lg border text-lg ${index < score ? "border-green-300 bg-green-100" : index === score ? "border-orange-300 bg-orange-100" : "border-gray-200 bg-gray-50"}`}>
+                {index === score ? "🏎️" : index < score ? "✓" : ""}
+              </div>
+            ))}
+          </div>
+          <p className="text-center text-sm font-semibold text-orange-400">Solve to move the racer.</p>
+        </div>
+        <h2 className="mb-6 text-center text-5xl font-extrabold text-red-600">{round.expression} = ?</h2>
+        <div className="flex justify-center gap-4">
+          {round.options.map((option) => {
+            let style = "border-orange-300 bg-orange-50 text-orange-700 hover:scale-[1.04]";
+            if (selected !== null) {
+              if (option === round.answer) style = "border-green-400 bg-green-100 text-green-700 scale-110";
+              else if (option === selected && !isCorrect) style = "border-red-300 bg-red-100 text-red-500 animate-[shake_0.4s_ease-in-out]";
+              else style = "border-gray-200 bg-gray-100 text-gray-400";
+            }
+            return <button key={option} onClick={() => handleAnswer(option)} disabled={selected !== null} className={`flex h-20 w-20 items-center justify-center rounded-2xl border-4 text-4xl font-black shadow-md transition-transform cursor-pointer sm:h-24 sm:w-24 ${style}`}>{option}</button>;
+          })}
+        </div>
+        {selected !== null && <p className={`mt-5 text-center text-2xl font-extrabold ${isCorrect ? "text-green-500" : "text-red-500"}`}>{isCorrect ? "🎉 Zoom!" : `${round.expression} = ${round.answer}`}</p>}
+      </div>
+    </GameWrapper>
+  );
+}
+
+// ============ ODD ONE OUT ============
+
+type OddChoice = {
+  label: string;
+  emoji: string;
+};
+
+type OddRound = {
+  prompt: string;
+  choices: OddChoice[];
+  answer: string;
+  reason: string;
+};
+
+const oddRounds: OddRound[] = [
+  { prompt: "Which one is not food?", choices: [{ label: "Apple", emoji: "🍎" }, { label: "Pizza", emoji: "🍕" }, { label: "Cake", emoji: "🎂" }, { label: "Car", emoji: "🚗" }], answer: "Car", reason: "A car is not food." },
+  { prompt: "Which one is not an animal?", choices: [{ label: "Dog", emoji: "🐶" }, { label: "Cat", emoji: "🐱" }, { label: "Fish", emoji: "🐟" }, { label: "Sun", emoji: "☀️" }], answer: "Sun", reason: "The sun is not an animal." },
+  { prompt: "Which one does not fly?", choices: [{ label: "Bird", emoji: "🐦" }, { label: "Airplane", emoji: "✈️" }, { label: "Butterfly", emoji: "🦋" }, { label: "Tree", emoji: "🌲" }], answer: "Tree", reason: "A tree stays in the ground." },
+  { prompt: "Which one is not a shape?", choices: [{ label: "Circle", emoji: "●" }, { label: "Square", emoji: "■" }, { label: "Triangle", emoji: "▲" }, { label: "Banana", emoji: "🍌" }], answer: "Banana", reason: "A banana is food." },
+  { prompt: "Which one is not in the sky?", choices: [{ label: "Moon", emoji: "🌙" }, { label: "Star", emoji: "⭐" }, { label: "Cloud", emoji: "☁️" }, { label: "Fish", emoji: "🐟" }], answer: "Fish", reason: "A fish swims in water." },
+  { prompt: "Which one is not red?", choices: [{ label: "Apple", emoji: "🍎" }, { label: "Heart", emoji: "❤️" }, { label: "Stop sign", emoji: "🛑" }, { label: "Leaf", emoji: "🍃" }], answer: "Leaf", reason: "A leaf is green." },
+  { prompt: "Which one starts with a different sound?", choices: [{ label: "Ball", emoji: "⚽" }, { label: "Book", emoji: "📘" }, { label: "Bird", emoji: "🐦" }, { label: "Cat", emoji: "🐱" }], answer: "Cat", reason: "Cat starts with C." },
+  { prompt: "Which one is not for school?", choices: [{ label: "Book", emoji: "📘" }, { label: "Pencil", emoji: "✏️" }, { label: "Backpack", emoji: "🎒" }, { label: "Pizza", emoji: "🍕" }], answer: "Pizza", reason: "Pizza is food." },
+];
+
+function OddOneOutGame({ onComplete, onBack, difficulty }: GameProps) {
+  const TOTAL = 8;
+  const [rounds] = useState<OddRound[]>(() => shuffle(oddRounds).map((round) => ({ ...round, choices: shuffle(round.choices) })));
+  const [current, setCurrent] = useState(0);
+  const [score, setScore] = useState(0);
+  const [selected, setSelected] = useState<string | null>(null);
+  const [isCorrect, setIsCorrect] = useState<boolean | null>(null);
+  const round = rounds[current];
+
+  function handleChoice(label: string) {
+    if (selected) return;
+    setSelected(label);
+    const correct = label === round.answer;
+    setIsCorrect(correct);
+    if (correct) {
+      setScore((value) => value + 1);
+      fireConfetti();
+    }
+    setTimeout(() => {
+      if (current + 1 >= TOTAL) onComplete(score + (correct ? 1 : 0), TOTAL);
+      else {
+        setCurrent((value) => value + 1);
+        setSelected(null);
+        setIsCorrect(null);
+      }
+    }, 1500);
+  }
+
+  return (
+    <GameWrapper title="Odd One Out" emoji="🧐" current={current} total={TOTAL} score={score} onBack={onBack} bgGradient="bg-gradient-to-br from-violet-50 via-purple-50 to-pink-100" difficulty={difficulty}>
+      <div className="w-full rounded-3xl bg-white p-5 shadow-2xl sm:p-7">
+        <h2 className="mb-5 text-center text-2xl font-extrabold text-violet-600 sm:text-3xl">{round.prompt}</h2>
+        <div className="grid grid-cols-2 gap-3">
+          {round.choices.map((choice) => {
+            let style = "border-violet-300 bg-violet-50 text-violet-700 hover:scale-[1.03]";
+            if (selected) {
+              if (choice.label === round.answer) style = "border-green-400 bg-green-100 text-green-700 scale-[1.03]";
+              else if (choice.label === selected && !isCorrect) style = "border-red-300 bg-red-100 text-red-500 animate-[shake_0.4s_ease-in-out]";
+              else style = "border-gray-200 bg-gray-100 text-gray-400";
+            }
+            return (
+              <button key={choice.label} onClick={() => handleChoice(choice.label)} disabled={!!selected} className={`rounded-2xl border-4 p-4 text-center shadow-md transition-transform cursor-pointer ${style}`}>
+                <div className="text-5xl">{choice.emoji}</div>
+                <div className="mt-2 text-lg font-extrabold">{choice.label}</div>
+              </button>
+            );
+          })}
+        </div>
+        {selected && <p className={`mt-5 text-center text-xl font-extrabold sm:text-2xl ${isCorrect ? "text-green-500" : "text-violet-500"}`}>{isCorrect ? "🎉 You found it!" : round.reason}</p>}
+      </div>
+    </GameWrapper>
+  );
+}
+
+// ============ STORY SEQUENCER ============
+
+type StoryStep = {
+  label: string;
+  emoji: string;
+};
+
+type StoryRound = {
+  title: string;
+  steps: StoryStep[];
+};
+
+const storyBank: StoryRound[] = [
+  { title: "Plant a Seed", steps: [{ label: "Seed", emoji: "🌱" }, { label: "Water", emoji: "💧" }, { label: "Sprout", emoji: "🌿" }, { label: "Flower", emoji: "🌸" }] },
+  { title: "Make a Sandwich", steps: [{ label: "Bread", emoji: "🍞" }, { label: "Cheese", emoji: "🧀" }, { label: "Stack", emoji: "🥪" }, { label: "Eat", emoji: "😋" }] },
+  { title: "Get Ready", steps: [{ label: "Wake", emoji: "⏰" }, { label: "Brush", emoji: "🪥" }, { label: "Backpack", emoji: "🎒" }, { label: "School", emoji: "🏫" }] },
+  { title: "Build a Snowman", steps: [{ label: "Snow", emoji: "❄️" }, { label: "Roll", emoji: "⚪" }, { label: "Stack", emoji: "☃️" }, { label: "Smile", emoji: "😊" }] },
+  { title: "Bake a Cake", steps: [{ label: "Mix", emoji: "🥣" }, { label: "Bake", emoji: "🔥" }, { label: "Decorate", emoji: "🎂" }, { label: "Share", emoji: "🍰" }] },
+  { title: "Rainy Day", steps: [{ label: "Cloud", emoji: "☁️" }, { label: "Rain", emoji: "🌧️" }, { label: "Puddle", emoji: "💦" }, { label: "Rainbow", emoji: "🌈" }] },
+  { title: "Trip", steps: [{ label: "Pack", emoji: "🧳" }, { label: "Car", emoji: "🚗" }, { label: "Map", emoji: "🗺️" }, { label: "Arrive", emoji: "🏖️" }] },
+  { title: "Bedtime", steps: [{ label: "Pajamas", emoji: "🛌" }, { label: "Book", emoji: "📘" }, { label: "Moon", emoji: "🌙" }, { label: "Sleep", emoji: "💤" }] },
+];
+
+function buildStoryRounds(difficulty: Difficulty): StoryRound[] {
+  return shuffle(storyBank).map((round) => ({
+    ...round,
+    steps: difficulty === "easy" ? round.steps.slice(0, 3) : round.steps,
+  }));
+}
+
+function StorySequencerGame({ onComplete, onBack, difficulty }: GameProps) {
+  const TOTAL = 8;
+  const [rounds] = useState<StoryRound[]>(() => buildStoryRounds(difficulty).slice(0, TOTAL));
+  const [current, setCurrent] = useState(0);
+  const [score, setScore] = useState(0);
+  const [choices, setChoices] = useState<StoryStep[]>(() => shuffle(rounds[0].steps));
+  const [selected, setSelected] = useState<StoryStep[]>([]);
+  const [isCorrect, setIsCorrect] = useState<boolean | null>(null);
+  const round = rounds[current];
+
+  function goNext(correct: boolean) {
+    setTimeout(() => {
+      if (current + 1 >= TOTAL) onComplete(score + (correct ? 1 : 0), TOTAL);
+      else {
+        const nextIndex = current + 1;
+        setCurrent(nextIndex);
+        setSelected([]);
+        setChoices(shuffle(rounds[nextIndex].steps));
+        setIsCorrect(null);
+      }
+    }, 1600);
+  }
+
+  function handleStep(step: StoryStep) {
+    if (isCorrect !== null || selected.some((item) => item.label === step.label)) return;
+    const nextSelected = [...selected, step];
+    setSelected(nextSelected);
+    if (nextSelected.length === round.steps.length) {
+      const correct = nextSelected.every((item, index) => item.label === round.steps[index].label);
+      setIsCorrect(correct);
+      if (correct) {
+        setScore((value) => value + 1);
+        fireConfetti();
+      }
+      goNext(correct);
+    }
+  }
+
+  return (
+    <GameWrapper title="Story Sequencer" emoji="📖" current={current} total={TOTAL} score={score} onBack={onBack} bgGradient="bg-gradient-to-br from-slate-50 via-sky-50 to-indigo-100" difficulty={difficulty}>
+      <div className="w-full rounded-3xl bg-white p-5 shadow-2xl sm:p-7">
+        <div className="mb-4 text-center">
+          <h2 className="text-2xl font-extrabold text-sky-700 sm:text-3xl">{round.title}</h2>
+          <p className="mt-1 text-sm font-semibold text-sky-300">Tap the pictures in story order.</p>
+        </div>
+        <div className="mb-5 flex justify-center gap-2 rounded-2xl bg-sky-50 p-4">
+          {round.steps.map((_, index) => (
+            <div key={index} className={`flex h-20 w-20 flex-col items-center justify-center rounded-xl border-4 text-center ${isCorrect === false ? "border-red-300 bg-red-50" : "border-sky-300 bg-white"}`}>
+              <span className="text-3xl">{selected[index]?.emoji ?? ""}</span>
+              <span className="mt-1 text-[11px] font-extrabold text-sky-700">{selected[index]?.label ?? ""}</span>
+            </div>
+          ))}
+        </div>
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          {choices.map((step) => {
+            const used = selected.some((item) => item.label === step.label);
+            return (
+              <button key={step.label} onClick={() => handleStep(step)} disabled={used || isCorrect !== null} className={`rounded-2xl border-4 p-3 text-center shadow-md transition-transform cursor-pointer ${used ? "border-gray-200 bg-gray-100 text-gray-300" : "border-indigo-300 bg-indigo-50 text-indigo-700 hover:scale-[1.03] active:scale-95"}`}>
+                <div className="text-4xl">{step.emoji}</div>
+                <div className="mt-1 text-sm font-extrabold">{step.label}</div>
+              </button>
+            );
+          })}
+        </div>
+        {isCorrect !== null && <p className={`mt-5 text-center text-xl font-extrabold sm:text-2xl ${isCorrect ? "text-green-500" : "text-sky-600"}`}>{isCorrect ? "🎉 Great story!" : `Order: ${round.steps.map((step) => step.label).join(" → ")}`}</p>}
+      </div>
+    </GameWrapper>
+  );
+}
+
+const gameRegistry: GameRegistryEntry[] = [
+  { key: "findit", emoji: "🔍", title: "Find It!", subtitle: "Vocabulary and picture matching", gradient: "from-orange-400 to-pink-500", bg: "bg-orange-50", total: (difficulty) => difficulty === "easy" ? 8 : 10, component: FindItGame, achievement: { id: "word-finder", label: "Word Finder", emoji: "🔍" } },
+  { key: "counting", emoji: "🔢", title: "Counting Fun", subtitle: "Count, group, and make 10", gradient: "from-blue-400 to-cyan-500", bg: "bg-blue-50", total: () => 8, component: CountingGame, achievement: { id: "counting-star", label: "Counting Star", emoji: "🔢" } },
+  { key: "colors", emoji: "🎨", title: "Color Quiz", subtitle: "Colors, shades, and shape clues", gradient: "from-purple-400 to-pink-500", bg: "bg-purple-50", total: () => 8, component: ColorGame, achievement: { id: "color-pro", label: "Color Pro", emoji: "🎨" } },
+  { key: "shapes", emoji: "🔷", title: "Shape Match", subtitle: "Names, sides, and real-world clues", gradient: "from-teal-400 to-emerald-500", bg: "bg-teal-50", total: () => 8, component: ShapeGame, achievement: { id: "shape-scout", label: "Shape Scout", emoji: "🔷" } },
+  { key: "math", emoji: "➕", title: "Math Fun", subtitle: "Add, subtract, and fill in the blank", gradient: "from-rose-400 to-red-500", bg: "bg-rose-50", total: () => 8, component: MathGame, achievement: { id: "math-star", label: "Math Star", emoji: "➕" } },
+  { key: "pattern", emoji: "🧩", title: "Pattern Fun", subtitle: "AB, AAB, ABC, and more", gradient: "from-indigo-400 to-violet-500", bg: "bg-indigo-50", total: () => 8, component: PatternGame, achievement: { id: "pattern-detective", label: "Pattern Detective", emoji: "🧩" } },
+  { key: "compare", emoji: "📏", title: "Compare Numbers", subtitle: "Greater, less, equal, and ordering", gradient: "from-amber-400 to-yellow-500", bg: "bg-amber-50", total: () => 8, component: CompareGame, achievement: { id: "compare-captain", label: "Compare Captain", emoji: "📏" } },
+  { key: "phonics", emoji: "📚", title: "Phonics Fun", subtitle: "Beginning sounds and rhymes", gradient: "from-lime-400 to-green-500", bg: "bg-lime-50", total: (difficulty) => difficulty === "hard" ? 10 : 8, component: PhonicsGame, achievement: { id: "reading-rockstar", label: "Reading Rockstar", emoji: "📚" } },
+  { key: "bubbles", emoji: "🫧", title: "Bubble Pop", subtitle: "Pop the letter bubbles!", gradient: "from-sky-400 to-blue-500", bg: "bg-sky-50", total: () => 8, component: BubblePopGame, achievement: { id: "bubble-master", label: "Bubble Master", emoji: "🫧" } },
+  { key: "memory", emoji: "🧠", title: "Memory Match", subtitle: "Flip cards and find pairs", gradient: "from-fuchsia-400 to-pink-500", bg: "bg-fuchsia-50", total: getMemoryPairCount, component: MemoryMatchGame, achievement: { id: "memory-champion", label: "Memory Champion", emoji: "🧠" } },
+  { key: "train", emoji: "🚂", title: "Number Train", subtitle: "Put number cars in order", gradient: "from-cyan-400 to-blue-500", bg: "bg-cyan-50", total: () => 8, component: NumberTrainGame, achievement: { id: "train-conductor", label: "Train Conductor", emoji: "🚂" } },
+  { key: "words", emoji: "🔤", title: "Word Builder", subtitle: "Tap letters to spell words", gradient: "from-emerald-400 to-lime-500", bg: "bg-emerald-50", total: getWordRoundTotal, component: WordBuilderGame, achievement: { id: "word-builder", label: "Word Builder", emoji: "🔤" } },
+  { key: "shapebuilder", emoji: "🧱", title: "Shape Builder", subtitle: "Choose shapes to build pictures", gradient: "from-teal-400 to-cyan-500", bg: "bg-teal-50", total: () => 8, component: ShapeBuilderGame, achievement: { id: "picture-builder", label: "Picture Builder", emoji: "🧱" } },
+  { key: "sort", emoji: "🧺", title: "Treasure Sort", subtitle: "Sort by color, group, or sound", gradient: "from-orange-400 to-amber-500", bg: "bg-orange-50", total: () => 8, component: TreasureSortGame, achievement: { id: "sorting-star", label: "Sorting Star", emoji: "🧺" } },
+  { key: "race", emoji: "🏎️", title: "Math Race", subtitle: "Solve to move the racer", gradient: "from-red-400 to-orange-500", bg: "bg-red-50", total: () => 8, component: MathRaceGame, achievement: { id: "math-racer", label: "Math Racer", emoji: "🏎️" } },
+  { key: "oddone", emoji: "🧐", title: "Odd One Out", subtitle: "Find what does not belong", gradient: "from-violet-400 to-purple-500", bg: "bg-violet-50", total: () => 8, component: OddOneOutGame, achievement: { id: "category-detective", label: "Category Detective", emoji: "🧐" } },
+  { key: "story", emoji: "📖", title: "Story Sequencer", subtitle: "Put picture stories in order", gradient: "from-sky-400 to-indigo-500", bg: "bg-sky-50", total: () => 8, component: StorySequencerGame, achievement: { id: "storyteller", label: "Storyteller", emoji: "📖" } },
+];
+
+const playableModes = gameRegistry.map((game) => game.key);
