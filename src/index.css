@@ -45,11 +45,16 @@ button {
   75% { transform: translateY(-15px) rotate(2deg); }
 }
 
+@keyframes bubbleRise {
+  0% { transform: translate(-50%, 0); }
+  100% { transform: translate(-50%, -520px); }
+}
+
 @keyframes bubbleWobble {
-  0%, 100% { transform: scale(1) rotate(0deg); }
-  25% { transform: scale(1.05) rotate(2deg); }
-  50% { transform: scale(0.97) rotate(-1deg); }
-  75% { transform: scale(1.03) rotate(1deg); }
+  0%, 100% { margin-left: 0; }
+  25% { margin-left: 8px; }
+  50% { margin-left: -5px; }
+  75% { margin-left: 6px; }
 }
 
 @keyframes bubblePop {

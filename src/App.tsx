@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState, useCallback } from "react";
 import confetti from "canvas-confetti";
 import {
-  findItQuestions,
   colorQuestions,
   shapeQuestions,
   generateCountingQuestions,
@@ -9,7 +8,6 @@ import {
   generatePatternQuestions,
   generateCompareQuestions,
   shuffle,
-  type FindItQuestion,
   type CountingQuestion,
   type ColorQuestion,
   type ShapeQuestion,
@@ -20,7 +18,6 @@ import {
 
 type Difficulty = "easy" | "medium" | "hard";
 type PlayableGameMode =
-  | "findit"
   | "counting"
   | "colors"
   | "shapes"
@@ -554,76 +551,6 @@ function GameWrapper({
   );
 }
 
-function buildFindItQuestions(difficulty: Difficulty): FindItQuestion[] {
-  const base = shuffle(findItQuestions).map((q) => ({ ...q, options: shuffle(q.options) }));
-  if (difficulty === "easy") return base.slice(0, 8);
-  if (difficulty === "medium") return base.slice(0, 10);
-  return base.map((q) => ({ ...q, word: `Find something that starts with ${q.word[0]}... ${q.word}` })).slice(0, 10);
-}
-
-function FindItGame({ onComplete, onBack, difficulty }: { onComplete: (score: number, total: number) => void; onBack: () => void; difficulty: Difficulty }) {
-  const TOTAL = difficulty === "easy" ? 8 : 10;
-  const [questions] = useState<FindItQuestion[]>(() => buildFindItQuestions(difficulty).slice(0, TOTAL));
-  const [current, setCurrent] = useState(0);
-  const [score, setScore] = useState(0);
-  const [selected, setSelected] = useState<string | null>(null);
-  const [isCorrect, setIsCorrect] = useState<boolean | null>(null);
-
-  const question = questions[current];
-
-  function handleSelect(option: string) {
-    if (selected) return;
-    setSelected(option);
-    const correct = option === question.correctEmoji;
-    setIsCorrect(correct);
-    if (correct) {
-      setScore((s) => s + 1);
-      fireConfetti();
-    }
-    setTimeout(() => {
-      if (current + 1 >= TOTAL) onComplete(score + (correct ? 1 : 0), TOTAL);
-      else {
-        setCurrent((c) => c + 1);
-        setSelected(null);
-        setIsCorrect(null);
-      }
-    }, 1400);
-  }
-
-  return (
-    <GameWrapper title="Find It!" emoji="🔍" current={current} total={TOTAL} score={score} onBack={onBack} bgGradient="bg-gradient-to-br from-orange-50 via-pink-50 to-yellow-100" difficulty={difficulty}>
-      <div className="w-full rounded-3xl bg-white p-6 shadow-2xl sm:p-8">
-        <div className="mb-3 text-center">
-          <p className="mb-1 text-xl font-bold text-gray-400">Find the...</p>
-          <h2 className="text-4xl font-extrabold text-orange-500 sm:text-5xl">{question.word}</h2>
-        </div>
-        <p className="mb-3 text-center text-base font-bold text-gray-500">Tap the picture that matches. 👇</p>
-        <div className="flex justify-center gap-4 sm:gap-6">
-          {question.options.map((option) => {
-            let btnStyle = "bg-gradient-to-br from-amber-50 to-orange-50 border-orange-200 hover:from-amber-100 hover:to-orange-100 hover:scale-110";
-            if (selected) {
-              if (option === question.correctEmoji) btnStyle = "bg-gradient-to-br from-green-100 to-emerald-200 border-green-400 scale-110 ring-4 ring-green-300";
-              else if (option === selected && !isCorrect) btnStyle = "bg-gradient-to-br from-red-100 to-pink-100 border-red-300 animate-[shake_0.4s_ease-in-out] opacity-60";
-              else btnStyle = "bg-gray-50 border-gray-200 opacity-40";
-            }
-            return (
-              <button key={option} onClick={() => handleSelect(option)} disabled={!!selected} className={`flex h-24 w-24 items-center justify-center rounded-3xl border-4 text-5xl transition-all duration-200 cursor-pointer sm:h-28 sm:w-28 sm:text-6xl ${btnStyle}`}>
-                {option}
-              </button>
-            );
-          })}
-        </div>
-        {selected && (
-          <div className="mt-5 text-center">
-            <p className={`text-2xl font-extrabold ${isCorrect ? "text-green-500" : "text-orange-400"}`}>{isCorrect ? "🎉 Great job!" : `Try again next time, it was ${question.correctEmoji}`}</p>
-            <p className="mt-1 text-sm font-semibold text-gray-400">{difficulty === "hard" ? `Hint: ${question.word[question.word.length - 1] ? `listen for the first sound in ${question.word.replace("Find something that starts with ", "")}` : ""}` : "Picture words help us read!"}</p>
-          </div>
-        )}
-      </div>
-    </GameWrapper>
-  );
-}
-
 type BuiltCountingQuestion = CountingQuestion & {
   questionType?: "make10";
   target?: number;
@@ -1135,17 +1062,11 @@ type BubbleData = {
   id: string;
   letter: string;
   x: number;
-  y: number;
   size: number;
   color: string;
   animDelay: number;
   animDuration: number;
   isCorrect: boolean;
-};
-
-type BubbleRound = {
-  targetLetter: string;
-  bubbles: BubbleData[];
 };
 
 const BUBBLE_COLORS = [
@@ -1163,12 +1084,19 @@ const BUBBLE_COLORS = [
   "linear-gradient(135deg, #FDCB6E 0%, #FEDA8E 50%, #FEE8AE 100%)",
 ];
 
-function generateBubbleRounds(difficulty: Difficulty): BubbleRound[] {
-  const rounds: BubbleRound[] = [];
-  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-  const totalRounds = 8;
+function getBubbleTargetCount(difficulty: Difficulty) {
+  if (difficulty === "easy") return 6;
+  if (difficulty === "medium") return 8;
+  return 10;
+}
 
-  // Similar-looking letter groups for hard mode
+function pickBubbleTarget() {
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+  return alphabet[Math.floor(Math.random() * alphabet.length)];
+}
+
+function generateBubbleStream(difficulty: Difficulty, target: string): BubbleData[] {
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
   const trickyGroups: string[][] = [
     ["B", "D", "P", "R"],
     ["M", "N", "W"],
@@ -1179,98 +1107,32 @@ function generateBubbleRounds(difficulty: Difficulty): BubbleRound[] {
     ["S", "Z"],
     ["K", "X"],
   ];
+  const targetCount = getBubbleTargetCount(difficulty);
+  const totalBubbles = difficulty === "easy" ? 18 : difficulty === "medium" ? 24 : 30;
+  const lanes = difficulty === "easy" ? [18, 42, 66, 82] : [12, 28, 44, 60, 76, 88];
+  const group = trickyGroups.find((candidate) => candidate.includes(target));
+  const distractorPool = group && difficulty === "hard"
+    ? [...group.filter((letter) => letter !== target), ...alphabet.split("").filter((letter) => letter !== target)]
+    : alphabet.split("").filter((letter) => letter !== target);
+  const letters = shuffle([
+    ...Array.from({ length: targetCount }, () => target),
+    ...Array.from({ length: totalBubbles - targetCount }, (_, index) => distractorPool[index % distractorPool.length]),
+  ]);
 
-  const bubbleCount = difficulty === "easy" ? 4 : difficulty === "medium" ? 5 : 6;
-  const usedLetters = new Set<string>();
-
-  for (let r = 0; r < totalRounds; r++) {
-    // Pick target letter (avoid repeats)
-    let target: string;
-    do {
-      target = alphabet[Math.floor(Math.random() * alphabet.length)];
-    } while (usedLetters.has(target) && usedLetters.size < 20);
-    usedLetters.add(target);
-
-    // Generate distractors
-    const distractors: string[] = [];
-    if (difficulty === "hard") {
-      // Use similar-looking letters as distractors
-      const group = trickyGroups.find((g) => g.includes(target));
-      if (group) {
-        const similar = group.filter((l) => l !== target);
-        distractors.push(...shuffle(similar).slice(0, bubbleCount - 1));
-      }
-      // Fill remaining with random
-      while (distractors.length < bubbleCount - 1) {
-        const randomLetter = alphabet[Math.floor(Math.random() * alphabet.length)];
-        if (randomLetter !== target && !distractors.includes(randomLetter)) {
-          distractors.push(randomLetter);
-        }
-      }
-    } else {
-      while (distractors.length < bubbleCount - 1) {
-        const randomLetter = alphabet[Math.floor(Math.random() * alphabet.length)];
-        if (randomLetter !== target && !distractors.includes(randomLetter)) {
-          distractors.push(randomLetter);
-        }
-      }
-    }
-
-    // For medium, randomly show some letters as lowercase
-    const allLetters = shuffle([target, ...distractors]).map((letter) => {
-      if (difficulty === "medium" && Math.random() > 0.5) {
-        return letter.toLowerCase();
-      }
-      if (difficulty === "hard" && Math.random() > 0.6) {
-        return letter.toLowerCase();
-      }
-      return letter;
-    });
-
-    // Target display: for medium/hard, show both cases
-    const displayTarget =
-      difficulty === "easy" ? target : `${target}`;
-
-    // Generate bubble positions (avoid overlapping)
-    const bubbles: BubbleData[] = [];
-    const positions: { x: number; y: number }[] = [];
-
-    for (let i = 0; i < allLetters.length; i++) {
-      const letter = allLetters[i];
-      const size = difficulty === "easy" ? 90 : difficulty === "medium" ? 80 : 72;
-
-      // Find non-overlapping position
-      let x: number, y: number;
-      let attempts = 0;
-      do {
-        x = 10 + Math.random() * (100 - size / 4 - 20);
-        y = 5 + Math.random() * (100 - size / 4 - 15);
-        attempts++;
-      } while (
-        attempts < 50 &&
-        positions.some(
-          (p) => Math.abs(p.x - x) < (size / 4 + 4) && Math.abs(p.y - y) < (size / 4 + 4)
-        )
-      );
-      positions.push({ x, y });
-
-      bubbles.push({
-        id: `${r}-${i}`,
-        letter,
-        x,
-        y,
-        size,
-        color: BUBBLE_COLORS[Math.floor(Math.random() * BUBBLE_COLORS.length)],
-        animDelay: Math.random() * 1.5,
-        animDuration: 2.5 + Math.random() * 2,
-        isCorrect: letter.toUpperCase() === target.toUpperCase(),
-      });
-    }
-
-    rounds.push({ targetLetter: displayTarget, bubbles });
-  }
-
-  return rounds;
+  return letters.map((letter, index) => {
+    const canUseLowercase = difficulty !== "easy" && Math.random() > (difficulty === "medium" ? 0.55 : 0.45);
+    const shownLetter = canUseLowercase ? letter.toLowerCase() : letter;
+    return {
+      id: `${letter}-${index}`,
+      letter: shownLetter,
+      x: lanes[index % lanes.length] + (Math.random() * 6 - 3),
+      size: difficulty === "easy" ? 84 : difficulty === "medium" ? 76 : 68,
+      color: BUBBLE_COLORS[Math.floor(Math.random() * BUBBLE_COLORS.length)],
+      animDelay: index * (difficulty === "easy" ? 1.2 : difficulty === "medium" ? 0.9 : 0.72),
+      animDuration: difficulty === "easy" ? 12 : difficulty === "medium" ? 10 : 8.5,
+      isCorrect: letter === target,
+    };
+  });
 }
 
 function BubblePopGame({
@@ -1282,59 +1144,30 @@ function BubblePopGame({
   onBack: () => void;
   difficulty: Difficulty;
 }) {
-  const TOTAL = 8;
-  const [rounds] = useState<BubbleRound[]>(() => generateBubbleRounds(difficulty));
-  const [current, setCurrent] = useState(0);
+  const TOTAL = getBubbleTargetCount(difficulty);
+  const [targetLetter] = useState(() => pickBubbleTarget());
+  const [bubbles] = useState<BubbleData[]>(() => generateBubbleStream(difficulty, targetLetter));
   const [score, setScore] = useState(0);
-  const [poppedId, setPoppedId] = useState<string | null>(null);
+  const [poppedIds, setPoppedIds] = useState<string[]>([]);
   const [wrongId, setWrongId] = useState<string | null>(null);
-  const [isCorrect, setIsCorrect] = useState<boolean | null>(null);
-  const [showResult, setShowResult] = useState(false);
-
-  const round = rounds[current];
+  const [message, setMessage] = useState("Pop every matching bubble before it floats away.");
 
   function handleBubblePop(bubble: BubbleData) {
-    if (poppedId || wrongId) return;
+    if (poppedIds.includes(bubble.id) || score >= TOTAL) return;
 
     if (bubble.isCorrect) {
-      setPoppedId(bubble.id);
-      setIsCorrect(true);
-      setScore((s) => s + 1);
+      const nextScore = score + 1;
+      setPoppedIds((ids) => [...ids, bubble.id]);
+      setScore(nextScore);
+      setMessage(nextScore >= TOTAL ? "All matching bubbles popped!" : "Pop! Find another one.");
       fireConfetti();
-      setShowResult(true);
-      setTimeout(() => {
-        if (current + 1 >= TOTAL) {
-          onComplete(score + 1, TOTAL);
-        } else {
-          setCurrent((c) => c + 1);
-          setPoppedId(null);
-          setWrongId(null);
-          setIsCorrect(null);
-          setShowResult(false);
-        }
-      }, 1600);
+      if (nextScore >= TOTAL) setTimeout(() => onComplete(nextScore, TOTAL), 1200);
     } else {
       setWrongId(bubble.id);
-      setIsCorrect(false);
-      setShowResult(true);
+      setMessage(`Keep looking for ${targetLetter}.`);
       setTimeout(() => {
         setWrongId(null);
-      }, 600);
-      setTimeout(() => {
-        // Show the correct one highlighted, then move on
-        setPoppedId(round.bubbles.find((b) => b.isCorrect)?.id || null);
-        setTimeout(() => {
-          if (current + 1 >= TOTAL) {
-            onComplete(score, TOTAL);
-          } else {
-            setCurrent((c) => c + 1);
-            setPoppedId(null);
-            setWrongId(null);
-            setIsCorrect(null);
-            setShowResult(false);
-          }
-        }, 1400);
-      }, 800);
+      }, 550);
     }
   }
 
@@ -1342,7 +1175,7 @@ function BubblePopGame({
     <GameWrapper
       title="Bubble Pop"
       emoji="🫧"
-      current={current}
+      current={Math.min(score, TOTAL - 1)}
       total={TOTAL}
       score={score}
       onBack={onBack}
@@ -1358,7 +1191,7 @@ function BubblePopGame({
             style={{ animation: "targetPulse 2s ease-in-out infinite" }}
           >
             <span className="text-5xl font-black text-sky-700 sm:text-6xl">
-              {round.targetLetter}
+              {targetLetter}
             </span>
           </div>
           <p className="mt-2 text-sm font-semibold text-sky-400">
@@ -1373,7 +1206,7 @@ function BubblePopGame({
         {/* Bubble field */}
         <div
           className="relative mx-auto overflow-hidden rounded-3xl border-2 border-sky-200 bg-gradient-to-b from-sky-50 via-blue-50 to-cyan-50"
-          style={{ height: "320px", maxWidth: "440px" }}
+          style={{ height: "360px", maxWidth: "440px" }}
         >
           {/* Decorative background bubbles */}
           {[...Array(6)].map((_, i) => (
@@ -1392,46 +1225,40 @@ function BubblePopGame({
           ))}
 
           {/* Interactive bubbles */}
-          {round.bubbles.map((bubble) => {
-            const isPopped = poppedId === bubble.id;
+          {bubbles.map((bubble) => {
+            const isPopped = poppedIds.includes(bubble.id);
             const isWrong = wrongId === bubble.id;
-            const isRevealed = poppedId && bubble.isCorrect && !isPopped && isCorrect === false;
 
             return (
               <button
                 key={bubble.id}
                 onClick={() => handleBubblePop(bubble)}
-                disabled={!!poppedId}
+                disabled={isPopped || score >= TOTAL}
                 className="absolute cursor-pointer"
                 style={{
                   left: `${bubble.x}%`,
-                  top: `${bubble.y}%`,
+                  bottom: `-${bubble.size + 24}px`,
                   width: `${bubble.size}px`,
                   height: `${bubble.size}px`,
-                  transform: "translate(-50%, -50%)",
-                  animation: isPopped
-                    ? "bubblePop 0.4s ease-out forwards"
-                    : isWrong
-                      ? "shake 0.4s ease-in-out"
-                      : `bubbleSpawn 0.5s ease-out ${bubble.animDelay}s both, bubbleFloat ${bubble.animDuration}s ease-in-out ${bubble.animDelay + 0.5}s infinite`,
+                  animation: `bubbleRise ${bubble.animDuration}s linear ${bubble.animDelay}s infinite`,
                   zIndex: isPopped || isWrong ? 20 : 10,
-                  filter: poppedId && !isPopped && !isRevealed ? "brightness(0.7) saturate(0.5)" : undefined,
                 }}
               >
                 <div
                   className="relative flex h-full w-full items-center justify-center rounded-full shadow-lg transition-shadow hover:shadow-xl"
                   style={{
                     background: bubble.color,
-                    border: isRevealed
-                      ? "4px solid #22C55E"
-                      : isWrong
+                    border: isWrong
                         ? "4px solid #EF4444"
                         : "3px solid rgba(255,255,255,0.6)",
-                    boxShadow: isRevealed
-                      ? "0 0 20px rgba(34,197,94,0.5)"
-                      : isWrong
+                    boxShadow: isWrong
                         ? "0 0 20px rgba(239,68,68,0.5)"
                         : "0 4px 15px rgba(0,0,0,0.1), inset 0 -4px 8px rgba(0,0,0,0.05)",
+                    animation: isPopped
+                      ? "bubblePop 0.4s ease-out forwards"
+                      : isWrong
+                        ? "shake 0.4s ease-in-out"
+                        : `bubbleWobble ${2.4 + (bubble.animDelay % 1.3)}s ease-in-out ${bubble.animDelay}s infinite`,
                   }}
                 >
                   {/* Bubble shine/glare effect */}
@@ -1465,24 +1292,14 @@ function BubblePopGame({
         </div>
 
         {/* Feedback */}
-        {showResult && (
-          <div className="mt-4 text-center">
-            <p
-              className={`text-2xl font-extrabold ${isCorrect ? "text-green-500" : "text-sky-400"}`}
-            >
-              {isCorrect
-                ? "🎉 Pop! Great job!"
-                : `Oops! Look for ${round.targetLetter}`}
-            </p>
-            <p className="mt-1 text-sm font-semibold text-sky-300">
-              {isCorrect
-                ? difficulty === "hard"
-                  ? "You spotted it through the tricky letters!"
-                  : "You found the right letter!"
-                : "Try the next one!"}
-            </p>
-          </div>
-        )}
+        <div className="mt-4 text-center">
+          <p className={`text-2xl font-extrabold ${score >= TOTAL ? "text-green-500" : "text-sky-500"}`}>
+            {message}
+          </p>
+          <p className="mt-1 text-sm font-semibold text-sky-300">
+            Reload the page to practice a different letter.
+          </p>
+        </div>
       </div>
     </GameWrapper>
   );
@@ -2227,7 +2044,6 @@ function StorySequencerGame({ onComplete, onBack, difficulty }: GameProps) {
 }
 
 const gameRegistry: GameRegistryEntry[] = [
-  { key: "findit", emoji: "🔍", title: "Find It!", subtitle: "Vocabulary and picture matching", gradient: "from-orange-400 to-pink-500", bg: "bg-orange-50", total: (difficulty) => difficulty === "easy" ? 8 : 10, component: FindItGame, achievement: { id: "word-finder", label: "Word Finder", emoji: "🔍" } },
   { key: "counting", emoji: "🔢", title: "Counting Fun", subtitle: "Count, group, and make 10", gradient: "from-blue-400 to-cyan-500", bg: "bg-blue-50", total: () => 8, component: CountingGame, achievement: { id: "counting-star", label: "Counting Star", emoji: "🔢" } },
   { key: "colors", emoji: "🎨", title: "Color Quiz", subtitle: "Colors, shades, and shape clues", gradient: "from-purple-400 to-pink-500", bg: "bg-purple-50", total: () => 8, component: ColorGame, achievement: { id: "color-pro", label: "Color Pro", emoji: "🎨" } },
   { key: "shapes", emoji: "🔷", title: "Shape Match", subtitle: "Names, sides, and real-world clues", gradient: "from-teal-400 to-emerald-500", bg: "bg-teal-50", total: () => 8, component: ShapeGame, achievement: { id: "shape-scout", label: "Shape Scout", emoji: "🔷" } },

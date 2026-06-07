@@ -1,33 +1,3 @@
-// ============ FIND IT! (Emoji Match) ============
-export interface FindItQuestion {
-  word: string;
-  correctEmoji: string;
-  options: string[];
-}
-
-export const findItQuestions: FindItQuestion[] = [
-  { word: "Apple", correctEmoji: "🍎", options: ["🍎", "🍌", "🍇"] },
-  { word: "Dog", correctEmoji: "🐶", options: ["🐱", "🐶", "🐸"] },
-  { word: "Sun", correctEmoji: "☀️", options: ["🌙", "⭐", "☀️"] },
-  { word: "Fish", correctEmoji: "🐟", options: ["🐟", "🐦", "🐛"] },
-  { word: "Car", correctEmoji: "🚗", options: ["🚲", "🚗", "✈️"] },
-  { word: "Star", correctEmoji: "⭐", options: ["🌙", "☀️", "⭐"] },
-  { word: "Flower", correctEmoji: "🌸", options: ["🌸", "🌲", "🍀"] },
-  { word: "Cat", correctEmoji: "🐱", options: ["🐶", "🐰", "🐱"] },
-  { word: "Moon", correctEmoji: "🌙", options: ["☀️", "🌙", "⭐"] },
-  { word: "Banana", correctEmoji: "🍌", options: ["🍎", "🍊", "🍌"] },
-  { word: "Bird", correctEmoji: "🐦", options: ["🐦", "🐟", "🦋"] },
-  { word: "Cake", correctEmoji: "🎂", options: ["🍕", "🎂", "🍪"] },
-  { word: "Tree", correctEmoji: "🌲", options: ["🌸", "🌲", "🍄"] },
-  { word: "Butterfly", correctEmoji: "🦋", options: ["🐛", "🦋", "🐝"] },
-  { word: "Pizza", correctEmoji: "🍕", options: ["🍕", "🍔", "🌮"] },
-  { word: "Rabbit", correctEmoji: "🐰", options: ["🐱", "🐭", "🐰"] },
-  { word: "Rainbow", correctEmoji: "🌈", options: ["🌈", "☀️", "🌧️"] },
-  { word: "Balloon", correctEmoji: "🎈", options: ["🎈", "🎁", "🎀"] },
-  { word: "Heart", correctEmoji: "❤️", options: ["⭐", "❤️", "💎"] },
-  { word: "Airplane", correctEmoji: "✈️", options: ["🚗", "🚀", "✈️"] },
-];
-
 // ============ COUNTING ============
 export interface CountingQuestion {
   emoji: string;
