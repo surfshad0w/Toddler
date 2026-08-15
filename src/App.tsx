@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useCallback } from "react";
+import { createContext, useContext, useEffect, useMemo, useState, useCallback } from "react";
 import confetti from "canvas-confetti";
 import {
   colorQuestions,
@@ -33,7 +33,8 @@ type PlayableGameMode =
   | "sort"
   | "race"
   | "oddone"
-  | "story";
+  | "story"
+  | "trace";
 type GameMode = "menu" | PlayableGameMode | "done";
 
 type ProgressRecord = Record<PlayableGameMode, Record<Difficulty, number>>;
@@ -71,6 +72,55 @@ type PhonicsQuestion = {
   choices: { label: string; emoji: string }[];
   answer: string;
   hint: string;
+};
+
+type RetryRequest = { hint: string; onRetry: () => void };
+type RetryContextValue = {
+  retry: RetryRequest | null;
+  showRetry: (hint: string, onRetry: () => void) => void;
+  clearRetry: () => void;
+};
+
+const RetryContext = createContext<RetryContextValue | null>(null);
+
+function useGameRetry() {
+  const context = useContext(RetryContext);
+  if (!context) throw new Error("useGameRetry must be used inside GameWrapper");
+  return context;
+}
+
+function GameRetryProvider({ children }: { children: React.ReactNode }) {
+  const [retry, setRetry] = useState<RetryRequest | null>(null);
+  return <RetryContext.Provider value={{ retry, showRetry: (hint, onRetry) => setRetry({ hint, onRetry }), clearRetry: () => setRetry(null) }}>{children}</RetryContext.Provider>;
+}
+
+function speak(text: string) {
+  if (typeof window === "undefined" || !("speechSynthesis" in window) || typeof SpeechSynthesisUtterance === "undefined") return;
+  window.speechSynthesis.cancel();
+  const utterance = new SpeechSynthesisUtterance(text);
+  utterance.rate = 0.85;
+  utterance.pitch = 1.08;
+  window.speechSynthesis.speak(utterance);
+}
+
+const spokenInstructions: Record<string, string> = {
+  "Counting Fun": "Count each picture, then tap the number that matches.",
+  "Color Quiz": "Look closely at the color, then tap its name.",
+  "Shape Match": "Look at the shape, then tap its name.",
+  "Math Fun": "Solve the math problem, then tap the answer.",
+  "Pattern Fun": "Look for the repeating pattern, then choose what comes next.",
+  "Compare Numbers": "Compare the two numbers and choose greater than, less than, or equal.",
+  "Phonics Fun": "Say each word slowly and listen for its first sound or rhyme.",
+  "Bubble Pop": "Find the matching letter and pop every bubble with that letter.",
+  "Memory Match": "Turn over two cards and look for a matching pair.",
+  "Number Train": "Tap the cars from the smallest number to the biggest number.",
+  "Word Builder": "Tap the letters in order to spell the word.",
+  "Shape Builder": "Choose the shapes that make the picture.",
+  "Treasure Sort": "Look at the treasure and choose the matching bin.",
+  "Math Race": "Solve the problem to move your racer forward.",
+  "Odd One Out": "Find the picture that does not belong.",
+  "Story Sequencer": "Put the pictures in the order that the story happens.",
+  "Trace & Draw": "Drag your finger along the dotted shape. Try to follow the path.",
 };
 
 const STORAGE_KEY = "toddler-site-progress-v2";
@@ -324,7 +374,7 @@ export function App() {
   const [progress, setProgress] = usePersistentProgress();
 
   const achievements = useMemo(() => getAchievementState(progress), [progress]);
-  const totalScore = useMemo(() => playableModes.reduce((sum, game) => sum + Object.values(progress[game]).reduce((a, b) => a + b, 0), 0), [progress]);
+  const totalScore = useMemo(() => playableModes.reduce((sum, mode) => sum + difficulties.reduce((gameStars, level) => gameStars + getStarRating(progress[mode][level], getGameTotal(mode, level)), 0), 0), [progress]);
   const gamesPlayed = useMemo(() => playableModes.reduce((sum, game) => sum + difficulties.filter((d) => progress[game][d] > 0).length, 0), [progress]);
 
   const handleGameComplete = useCallback((score: number, total: number) => {
@@ -369,7 +419,7 @@ export function App() {
     const entry = gameRegistry.find((game) => game.key === mode);
     if (entry) {
       const GameComponent = entry.component;
-      return <GameComponent difficulty={difficulty} onComplete={handleGameComplete} onBack={() => setMode("menu")} />;
+      return <GameRetryProvider><GameComponent difficulty={difficulty} onComplete={handleGameComplete} onBack={() => setMode("menu")} /></GameRetryProvider>;
     }
   }
 
@@ -393,12 +443,25 @@ function MainMenu({
   progress: ProgressRecord;
   achievements: Achievement[];
 }) {
+  const [showAllGames, setShowAllGames] = useState(false);
+  const [showBadges, setShowBadges] = useState(false);
+  const visibleGames = showAllGames ? gameRegistry : gameRegistry.slice(0, 6);
+
   return (
     <div className="flex min-h-screen flex-col items-center justify-center bg-gradient-to-br from-yellow-100 via-pink-100 to-purple-200 px-4 py-8">
       <div className="w-full max-w-2xl text-center">
         <div className="mb-2 text-6xl animate-bounce">🌟</div>
         <h1 className="mb-1 text-4xl font-extrabold text-purple-600">Fun Learning Adventure!</h1>
-        <p className="mb-6 text-lg font-medium text-purple-400">Choose a level, then pick a game to play.</p>
+        <p className="mb-4 text-lg font-medium text-purple-400">Pick a game and let’s learn through play!</p>
+
+        <button
+          onClick={() => onSelect("counting")}
+          className="mb-5 w-full rounded-3xl bg-gradient-to-r from-purple-500 via-pink-500 to-orange-400 p-5 text-left text-white shadow-xl transition-transform hover:scale-[1.02] active:scale-[0.98]"
+        >
+          <span className="block text-sm font-bold uppercase tracking-wide text-white/80">Today’s adventure</span>
+          <span className="mt-1 block text-2xl font-extrabold">Start a quick game 🚀</span>
+          <span className="mt-1 block text-sm font-semibold text-white/85">A grown-up can choose the level below.</span>
+        </button>
 
         <div className="mb-6 rounded-3xl bg-white/80 p-4 shadow-lg backdrop-blur-sm">
           <p className="mb-3 text-sm font-bold uppercase tracking-wide text-purple-400">Difficulty</p>
@@ -426,7 +489,7 @@ function MainMenu({
         )}
 
         <div className="mb-6 grid gap-4 md:grid-cols-2">
-          {gameRegistry.map((game) => {
+          {visibleGames.map((game) => {
             const best = progress[game.key][difficulty];
             const total = game.total(difficulty);
             const stars = getStarRating(best, total);
@@ -453,9 +516,19 @@ function MainMenu({
           })}
         </div>
 
+        <button
+          onClick={() => setShowAllGames((value) => !value)}
+          className="mb-5 rounded-full bg-white px-6 py-3 text-lg font-extrabold text-purple-600 shadow-md transition-transform hover:scale-105 active:scale-95"
+        >
+          {showAllGames ? "Show fewer games" : `Show all ${gameRegistry.length} games`}
+        </button>
+
         <div className="rounded-3xl bg-white/85 p-5 text-left shadow-lg backdrop-blur-sm">
-          <h2 className="mb-3 text-lg font-extrabold text-purple-600">Badges Earned</h2>
-          <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-3">
+          <button onClick={() => setShowBadges((value) => !value)} className="flex w-full items-center justify-between text-left text-lg font-extrabold text-purple-600">
+            <span>Rewards</span><span aria-hidden="true">{showBadges ? "▲" : "▼"}</span>
+          </button>
+          {!showBadges && <p className="mt-1 text-sm font-semibold text-purple-300">{achievements.filter((achievement) => achievement.unlocked).length} badges unlocked</p>}
+          {showBadges && <div className="mt-3 grid gap-3 sm:grid-cols-2 md:grid-cols-3">
             {achievements.map((achievement) => (
               <div
                 key={achievement.id}
@@ -466,7 +539,7 @@ function MainMenu({
                 <div className="text-xs font-medium">{achievement.unlocked ? "Unlocked!" : "Keep playing to earn this"}</div>
               </div>
             ))}
-          </div>
+          </div>}
         </div>
       </div>
     </div>
@@ -523,6 +596,8 @@ function GameWrapper({
   children: React.ReactNode;
 }) {
   const progress = ((current + 1) / total) * 100;
+  const { retry } = useGameRetry();
+  const instruction = spokenInstructions[title] ?? `Play ${title}. Tap an answer when you are ready.`;
 
   return (
     <div className={`flex min-h-screen flex-col items-center ${bgGradient} px-4 py-6`}>
@@ -530,23 +605,45 @@ function GameWrapper({
         <div className="mb-2 flex items-center justify-between">
           <button
             onClick={onBack}
+            aria-label="Back to games"
             className="flex h-10 w-10 items-center justify-center rounded-full bg-white/80 text-xl shadow-md transition-transform hover:scale-110 active:scale-95 cursor-pointer"
           >
             ←
           </button>
           <h1 className="text-center text-xl font-extrabold text-purple-600 sm:text-2xl">{emoji} {title}</h1>
-          <div className="flex items-center gap-1 rounded-full bg-white px-3 py-1.5 shadow-md">
-            <span className="text-lg">⭐</span>
-            <span className="text-lg font-bold text-amber-500">{score}</span>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => speak(instruction)}
+              aria-label="Hear instructions"
+              className="flex h-10 w-10 items-center justify-center rounded-full bg-white/80 text-xl shadow-md transition-transform hover:scale-110 active:scale-95 cursor-pointer"
+            >
+              🔊
+            </button>
+            <div className="flex items-center gap-1 rounded-full bg-white px-3 py-1.5 shadow-md">
+              <span className="text-lg">⭐</span>
+              <span className="text-lg font-bold text-amber-500">{score}</span>
+            </div>
           </div>
         </div>
         <div className="mb-2 text-center text-sm font-bold uppercase tracking-wide text-purple-400">{difficultyLabels[difficulty]} Mode</div>
-        <div className="mt-3 h-4 w-full overflow-hidden rounded-full bg-white/60 shadow-inner">
+        <div className="mt-3 h-4 w-full overflow-hidden rounded-full bg-white/60 shadow-inner" role="progressbar" aria-valuemin={0} aria-valuemax={total} aria-valuenow={Math.min(current + 1, total)} aria-label={`${Math.min(current + 1, total)} of ${total} questions`}>
           <div className="h-full rounded-full bg-gradient-to-r from-green-400 to-emerald-500 transition-all duration-500" style={{ width: `${progress}%` }} />
         </div>
         <p className="mt-1 text-center text-sm font-semibold text-purple-400">{current + 1} / {total}</p>
       </div>
-      <div className="flex w-full max-w-md flex-1 items-start justify-center">{children}</div>
+      <div className="flex w-full max-w-md flex-1 items-start justify-center">
+        <div className="w-full">
+          {children}
+          {retry && (
+            <div className="mt-3 rounded-2xl bg-white/95 p-4 text-center shadow-lg" role="alert">
+              <p className="text-base font-bold text-purple-500">💡 {retry.hint}</p>
+              <button onClick={retry.onRetry} className="mt-3 rounded-full bg-gradient-to-r from-purple-500 to-pink-500 px-6 py-2 text-lg font-extrabold text-white shadow-md transition-transform hover:scale-105 active:scale-95">
+                Try again ↩️
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
@@ -588,6 +685,7 @@ function CountingGame({ onComplete, onBack, difficulty }: { onComplete: (score: 
   const [score, setScore] = useState(0);
   const [selected, setSelected] = useState<number | null>(null);
   const [isCorrect, setIsCorrect] = useState<boolean | null>(null);
+  const { showRetry, clearRetry } = useGameRetry();
   const question = questions[current];
   const expectedAnswer = question.questionType === "make10" ? 10 - question.count : question.count;
   const emojiDisplay = Array.from({ length: question.count }, (_, i) => (
@@ -600,8 +698,16 @@ function CountingGame({ onComplete, onBack, difficulty }: { onComplete: (score: 
     const correct = option === expectedAnswer;
     setIsCorrect(correct);
     if (correct) {
+      clearRetry();
       setScore((s) => s + 1);
       fireConfetti();
+    } else {
+      showRetry(question.questionType === "make10" ? "Count on from the pictures to make 10." : "Touch each picture once as you count.", () => {
+        setSelected(null);
+        setIsCorrect(null);
+        clearRetry();
+      });
+      return;
     }
     setTimeout(() => {
       if (current + 1 >= TOTAL) onComplete(score + (correct ? 1 : 0), TOTAL);
@@ -625,14 +731,14 @@ function CountingGame({ onComplete, onBack, difficulty }: { onComplete: (score: 
           {question.options.map((option: number) => {
             let btnStyle = "bg-gradient-to-br from-blue-100 to-cyan-100 border-blue-300 text-blue-700 hover:from-blue-200 hover:to-cyan-200";
             if (selected !== null) {
-              if (option === expectedAnswer) btnStyle = "bg-gradient-to-br from-green-100 to-emerald-200 border-green-400 text-green-700 scale-110";
-              else if (option === selected && !isCorrect) btnStyle = "bg-gradient-to-br from-red-100 to-pink-100 border-red-300 text-red-500 animate-[shake_0.4s_ease-in-out]";
-              else btnStyle = "bg-gray-100 border-gray-200 text-gray-400";
+              if (isCorrect && option === expectedAnswer) btnStyle = "bg-gradient-to-br from-green-100 to-emerald-200 border-green-400 text-green-700 scale-110";
+              else if (!isCorrect && option === selected) btnStyle = "bg-gradient-to-br from-red-100 to-pink-100 border-red-300 text-red-500 animate-[shake_0.4s_ease-in-out]";
+              else if (isCorrect) btnStyle = "bg-gray-100 border-gray-200 text-gray-400";
             }
             return <button key={option} onClick={() => handleSelect(option)} disabled={selected !== null} className={`flex h-20 w-20 items-center justify-center rounded-2xl border-4 text-4xl font-extrabold transition-all duration-200 cursor-pointer sm:h-24 sm:w-24 sm:text-5xl ${btnStyle}`}>{option}</button>;
           })}
         </div>
-        {selected !== null && <div className="mt-5 text-center"><p className={`text-2xl font-extrabold ${isCorrect ? "text-green-500" : "text-blue-400"}`}>{isCorrect ? "🎉 Correct!" : question.questionType === "make10" ? `${question.count} and ${expectedAnswer} make 10.` : `There are ${expectedAnswer}!`}</p></div>}
+        {selected !== null && <div className="mt-5 text-center"><p className={`text-2xl font-extrabold ${isCorrect ? "text-green-500" : "text-blue-400"}`}>{isCorrect ? "🎉 Correct!" : "Have another try!"}</p></div>}
       </div>
     </GameWrapper>
   );
@@ -645,6 +751,7 @@ function ColorGame({ onComplete, onBack, difficulty }: { onComplete: (score: num
   const [score, setScore] = useState(0);
   const [selected, setSelected] = useState<string | null>(null);
   const [isCorrect, setIsCorrect] = useState<boolean | null>(null);
+  const { showRetry, clearRetry } = useGameRetry();
   const question = questions[current];
 
   function handleSelect(option: string) {
@@ -653,8 +760,12 @@ function ColorGame({ onComplete, onBack, difficulty }: { onComplete: (score: num
     const correct = option === question.colorName;
     setIsCorrect(correct);
     if (correct) {
+      clearRetry();
       setScore((s) => s + 1);
       fireConfetti();
+    } else {
+      showRetry("Look at the color, not the shape. Try the color word again.", () => { setSelected(null); setIsCorrect(null); clearRetry(); });
+      return;
     }
     setTimeout(() => {
       if (current + 1 >= TOTAL) onComplete(score + (correct ? 1 : 0), TOTAL);
@@ -678,14 +789,14 @@ function ColorGame({ onComplete, onBack, difficulty }: { onComplete: (score: num
           {question.options.map((option) => {
             let btnStyle = "bg-gradient-to-br from-purple-50 to-fuchsia-50 border-purple-300 text-purple-700 hover:from-purple-100 hover:to-fuchsia-100";
             if (selected) {
-              if (option === question.colorName) btnStyle = "bg-green-100 border-green-400 text-green-700 scale-105";
-              else if (option === selected && !isCorrect) btnStyle = "bg-red-100 border-red-300 text-red-500 animate-[shake_0.4s_ease-in-out]";
-              else btnStyle = "bg-gray-50 border-gray-200 text-gray-400";
+              if (isCorrect && option === question.colorName) btnStyle = "bg-green-100 border-green-400 text-green-700 scale-105";
+              else if (!isCorrect && option === selected) btnStyle = "bg-red-100 border-red-300 text-red-500 animate-[shake_0.4s_ease-in-out]";
+              else if (isCorrect) btnStyle = "bg-gray-50 border-gray-200 text-gray-400";
             }
             return <button key={option} onClick={() => handleSelect(option)} disabled={!!selected} className={`w-full rounded-2xl border-2 p-4 text-2xl font-extrabold transition-all duration-200 cursor-pointer sm:text-3xl ${btnStyle}`}>{option}</button>;
           })}
         </div>
-        {selected && <div className="mt-4 text-center"><p className={`text-2xl font-extrabold ${isCorrect ? "text-green-500" : "text-purple-400"}`}>{isCorrect ? "🎉 Correct!" : `It’s ${question.colorName}!`}</p><p className="mt-1 text-sm font-semibold text-purple-300">{difficulty === "hard" ? `${question.colorName} is the color word.` : "You matched the color correctly."}</p></div>}
+        {selected && <div className="mt-4 text-center"><p className={`text-2xl font-extrabold ${isCorrect ? "text-green-500" : "text-purple-400"}`}>{isCorrect ? "🎉 Correct!" : "Have another try!"}</p><p className="mt-1 text-sm font-semibold text-purple-300">{difficulty === "hard" ? `${question.colorName} is the color word.` : "Look carefully and try again."}</p></div>}
       </div>
     </GameWrapper>
   );
@@ -722,6 +833,7 @@ function ShapeGame({ onComplete, onBack, difficulty }: { onComplete: (score: num
   const [score, setScore] = useState(0);
   const [selected, setSelected] = useState<string | null>(null);
   const [isCorrect, setIsCorrect] = useState<boolean | null>(null);
+  const { showRetry, clearRetry } = useGameRetry();
   const question = questions[current];
   const shapeFacts: Record<string, string> = { Circle: "A circle has no corners.", Square: "A square has 4 equal sides.", Triangle: "A triangle has 3 sides.", Star: "A star has points.", Heart: "A heart has a point at the bottom.", Diamond: "A diamond looks like a tilted square.", Oval: "An oval is stretched out like an egg.", Rectangle: "A rectangle has 4 sides, two are long.", Crescent: "A crescent looks like the moon.", Cross: "A cross has lines that intersect.", Arrow: "An arrow points in a direction.", Hexagon: "A hexagon has 6 sides." };
 
@@ -731,8 +843,12 @@ function ShapeGame({ onComplete, onBack, difficulty }: { onComplete: (score: num
     const correct = option === question.shapeName;
     setIsCorrect(correct);
     if (correct) {
+      clearRetry();
       setScore((s) => s + 1);
       fireConfetti();
+    } else {
+      showRetry("Look at the sides, corners, and curves. Try the shape name again.", () => { setSelected(null); setIsCorrect(null); clearRetry(); });
+      return;
     }
     setTimeout(() => {
       if (current + 1 >= TOTAL) onComplete(score + (correct ? 1 : 0), TOTAL);
@@ -749,19 +865,19 @@ function ShapeGame({ onComplete, onBack, difficulty }: { onComplete: (score: num
       <div className="w-full rounded-3xl bg-white p-6 shadow-2xl sm:p-8">
         <div className="mb-4 flex justify-center"><ShapeSVG name={question.shapeName} size={160} /></div>
         <h2 className="mb-2 text-center text-2xl font-extrabold text-gray-700 sm:text-3xl">What shape is this?</h2>
-        <p className="mb-6 text-center text-sm font-semibold text-teal-400">{difficulty === "hard" ? shapeFacts[question.shapeName] : "Look at the shape carefully."}</p>
+        <p className="mb-6 text-center text-sm font-semibold text-teal-400">{difficulty === "hard" ? "Use sides, corners, and curves as clues." : "Look at the shape carefully."}</p>
         <div className="space-y-3">
           {question.options.map((option) => {
             let btnStyle = "bg-gradient-to-br from-teal-50 to-emerald-50 border-teal-300 text-teal-700 hover:from-teal-100 hover:to-emerald-100";
             if (selected) {
-              if (option === question.shapeName) btnStyle = "bg-green-100 border-green-400 text-green-700 scale-105";
-              else if (option === selected && !isCorrect) btnStyle = "bg-red-100 border-red-300 text-red-500 animate-[shake_0.4s_ease-in-out]";
-              else btnStyle = "bg-gray-50 border-gray-200 text-gray-400";
+              if (isCorrect && option === question.shapeName) btnStyle = "bg-green-100 border-green-400 text-green-700 scale-105";
+              else if (!isCorrect && option === selected) btnStyle = "bg-red-100 border-red-300 text-red-500 animate-[shake_0.4s_ease-in-out]";
+              else if (isCorrect) btnStyle = "bg-gray-50 border-gray-200 text-gray-400";
             }
             return <button key={option} onClick={() => handleSelect(option)} disabled={!!selected} className={`w-full rounded-2xl border-2 p-4 text-2xl font-extrabold transition-all duration-200 cursor-pointer sm:text-3xl ${btnStyle}`}>{option}</button>;
           })}
         </div>
-        {selected && <div className="mt-4 text-center"><p className={`text-2xl font-extrabold ${isCorrect ? "text-green-500" : "text-teal-400"}`}>{isCorrect ? "🎉 Correct!" : `It’s a ${question.shapeName}!`}</p><p className="mt-1 text-sm font-semibold text-teal-300">{shapeFacts[question.shapeName]}</p></div>}
+        {selected && <div className="mt-4 text-center"><p className={`text-2xl font-extrabold ${isCorrect ? "text-green-500" : "text-teal-400"}`}>{isCorrect ? "🎉 Correct!" : "Have another try!"}</p><p className="mt-1 text-sm font-semibold text-teal-300">{isCorrect ? shapeFacts[question.shapeName] : "Look at the sides and corners."}</p></div>}
       </div>
     </GameWrapper>
   );
@@ -801,6 +917,7 @@ function MathGame({ onComplete, onBack, difficulty }: { onComplete: (score: numb
   const [score, setScore] = useState(0);
   const [selected, setSelected] = useState<number | null>(null);
   const [isCorrect, setIsCorrect] = useState<boolean | null>(null);
+  const { showRetry, clearRetry } = useGameRetry();
   const question = questions[current];
   const answer = question.answer;
 
@@ -810,8 +927,12 @@ function MathGame({ onComplete, onBack, difficulty }: { onComplete: (score: numb
     const correct = option === answer;
     setIsCorrect(correct);
     if (correct) {
+      clearRetry();
       setScore((s) => s + 1);
       fireConfetti();
+    } else {
+      showRetry("Use your fingers or count the numbers. Try the equation again.", () => { setSelected(null); setIsCorrect(null); clearRetry(); });
+      return;
     }
     setTimeout(() => {
       if (current + 1 >= TOTAL) onComplete(score + (correct ? 1 : 0), TOTAL);
@@ -835,14 +956,14 @@ function MathGame({ onComplete, onBack, difficulty }: { onComplete: (score: numb
           {options.map((option: number) => {
             let btnStyle = "bg-gradient-to-br from-rose-100 to-red-100 border-rose-300 text-rose-700 hover:from-rose-200 hover:to-red-200";
             if (selected !== null) {
-              if (option === answer) btnStyle = "bg-gradient-to-br from-green-100 to-emerald-200 border-green-400 text-green-700 scale-110";
-              else if (option === selected && !isCorrect) btnStyle = "bg-gradient-to-br from-red-100 to-pink-100 border-red-300 text-red-500 animate-[shake_0.4s_ease-in-out]";
-              else btnStyle = "bg-gray-100 border-gray-200 text-gray-400";
+              if (isCorrect && option === answer) btnStyle = "bg-gradient-to-br from-green-100 to-emerald-200 border-green-400 text-green-700 scale-110";
+              else if (!isCorrect && option === selected) btnStyle = "bg-gradient-to-br from-red-100 to-pink-100 border-red-300 text-red-500 animate-[shake_0.4s_ease-in-out]";
+              else if (isCorrect) btnStyle = "bg-gray-100 border-gray-200 text-gray-400";
             }
             return <button key={option} onClick={() => handleSelect(option)} disabled={selected !== null} className={`flex h-20 w-20 items-center justify-center rounded-2xl border-4 text-4xl font-extrabold transition-all duration-200 cursor-pointer sm:h-24 sm:w-24 sm:text-5xl ${btnStyle}`}>{option}</button>;
           })}
         </div>
-        {selected !== null && <div className="mt-5 text-center"><p className={`text-2xl font-extrabold ${isCorrect ? "text-green-500" : "text-rose-400"}`}>{isCorrect ? "🎉 Correct!" : question.questionType === "missing" ? `The missing number is ${answer}.` : `${question.num1} ${question.operator} ${question.num2} = ${answer}`}</p></div>}
+        {selected !== null && <div className="mt-5 text-center"><p className={`text-2xl font-extrabold ${isCorrect ? "text-green-500" : "text-rose-400"}`}>{isCorrect ? "🎉 Correct!" : "Have another try!"}</p></div>}
       </div>
     </GameWrapper>
   );
@@ -876,6 +997,7 @@ function PatternGame({ onComplete, onBack, difficulty }: { onComplete: (score: n
   const [score, setScore] = useState(0);
   const [selected, setSelected] = useState<string | null>(null);
   const [isCorrect, setIsCorrect] = useState<boolean | null>(null);
+  const { showRetry, clearRetry } = useGameRetry();
   const question = questions[current];
 
   function handleSelect(option: string) {
@@ -884,8 +1006,12 @@ function PatternGame({ onComplete, onBack, difficulty }: { onComplete: (score: n
     const correct = option === question.answer;
     setIsCorrect(correct);
     if (correct) {
+      clearRetry();
       setScore((s) => s + 1);
       fireConfetti();
+    } else {
+      showRetry("Find the part that repeats. What would come next in the same order?", () => { setSelected(null); setIsCorrect(null); clearRetry(); });
+      return;
     }
     setTimeout(() => {
       if (current + 1 >= TOTAL) onComplete(score + (correct ? 1 : 0), TOTAL);
@@ -909,14 +1035,14 @@ function PatternGame({ onComplete, onBack, difficulty }: { onComplete: (score: n
           {question.options.map((option) => {
             let btnStyle = "bg-gradient-to-br from-indigo-100 to-violet-100 border-indigo-300 hover:from-indigo-200 hover:to-violet-200";
             if (selected !== null) {
-              if (option === question.answer) btnStyle = "bg-gradient-to-br from-green-100 to-emerald-200 border-green-400 scale-110";
-              else if (option === selected && !isCorrect) btnStyle = "bg-gradient-to-br from-red-100 to-pink-100 border-red-300 animate-[shake_0.4s_ease-in-out]";
-              else btnStyle = "bg-gray-100 border-gray-200 opacity-50";
+              if (isCorrect && option === question.answer) btnStyle = "bg-gradient-to-br from-green-100 to-emerald-200 border-green-400 scale-110";
+              else if (!isCorrect && option === selected) btnStyle = "bg-gradient-to-br from-red-100 to-pink-100 border-red-300 animate-[shake_0.4s_ease-in-out]";
+              else if (isCorrect) btnStyle = "bg-gray-100 border-gray-200 opacity-50";
             }
             return <button key={option} onClick={() => handleSelect(option)} disabled={selected !== null} className={`flex h-20 w-20 items-center justify-center rounded-2xl border-4 text-4xl transition-all duration-200 cursor-pointer sm:h-24 sm:w-24 sm:text-5xl ${btnStyle}`}>{option}</button>;
           })}
         </div>
-        {selected !== null && <div className="mt-5 text-center"><p className={`text-2xl font-extrabold ${isCorrect ? "text-green-500" : "text-indigo-400"}`}>{isCorrect ? "🎉 Correct!" : `It was ${question.answer}`}</p></div>}
+        {selected !== null && <div className="mt-5 text-center"><p className={`text-2xl font-extrabold ${isCorrect ? "text-green-500" : "text-indigo-400"}`}>{isCorrect ? "🎉 Correct!" : "Have another try!"}</p></div>}
       </div>
     </GameWrapper>
   );
@@ -950,6 +1076,7 @@ function CompareGame({ onComplete, onBack, difficulty }: { onComplete: (score: n
   const [score, setScore] = useState(0);
   const [selected, setSelected] = useState<string | null>(null);
   const [isCorrect, setIsCorrect] = useState<boolean | null>(null);
+  const { showRetry, clearRetry } = useGameRetry();
   const question = questions[current];
   const symbolIcons: Record<string, string> = { ">": "›", "<": "‹", "=": "=" };
   const symbolLabels: Record<string, string> = { ">": "Greater Than", "<": "Less Than", "=": "Equal" };
@@ -960,8 +1087,12 @@ function CompareGame({ onComplete, onBack, difficulty }: { onComplete: (score: n
     const correct = choice === question.answer;
     setIsCorrect(correct);
     if (correct) {
+      clearRetry();
       setScore((s) => s + 1);
       fireConfetti();
+    } else {
+      showRetry("Say the two numbers aloud. Which side has more?", () => { setSelected(null); setIsCorrect(null); clearRetry(); });
+      return;
     }
     setTimeout(() => {
       if (current + 1 >= TOTAL) onComplete(score + (correct ? 1 : 0), TOTAL);
@@ -977,9 +1108,10 @@ function CompareGame({ onComplete, onBack, difficulty }: { onComplete: (score: n
   function getButtonStyle(choice: string) {
     const base = "w-full rounded-2xl border-4 px-3 py-4 sm:px-5 sm:py-5 font-extrabold transition-all duration-200 cursor-pointer flex flex-col items-center justify-center gap-1";
     if (selected === null) return `${base} bg-gradient-to-br from-amber-100 to-yellow-100 border-amber-300 text-amber-700 hover:from-amber-200 hover:to-yellow-200 hover:scale-[1.03] active:scale-[0.97]`;
-    if (choice === question.answer) return `${base} bg-gradient-to-br from-green-100 to-emerald-200 border-green-400 text-green-700 scale-[1.05]`;
-    if (choice === selected && !isCorrect) return `${base} bg-gradient-to-br from-red-100 to-pink-100 border-red-300 text-red-500 animate-[shake_0.4s_ease-in-out]`;
-    return `${base} bg-gray-100 border-gray-200 text-gray-400 opacity-50`;
+    if (isCorrect && choice === question.answer) return `${base} bg-gradient-to-br from-green-100 to-emerald-200 border-green-400 text-green-700 scale-[1.05]`;
+    if (!isCorrect && choice === selected) return `${base} bg-gradient-to-br from-red-100 to-pink-100 border-red-300 text-red-500 animate-[shake_0.4s_ease-in-out]`;
+    if (isCorrect) return `${base} bg-gray-100 border-gray-200 text-gray-400 opacity-50`;
+    return `${base} bg-gradient-to-br from-amber-100 to-yellow-100 border-amber-300 text-amber-700`;
   }
 
   return (
@@ -994,7 +1126,7 @@ function CompareGame({ onComplete, onBack, difficulty }: { onComplete: (score: n
         <div className="mb-3 grid grid-cols-3 gap-2 sm:gap-3">
           {choices.map((c) => <button key={c} onClick={() => handleSelect(c)} disabled={selected !== null} className={getButtonStyle(c)}><span className="text-3xl leading-none sm:text-5xl">{symbolIcons[c]}</span><span className="text-xs leading-tight sm:text-base">{symbolLabels[c]}</span></button>)}
         </div>
-        {selected !== null && <div className="mt-4 text-center"><p className={`text-xl font-extrabold sm:text-2xl ${isCorrect ? "text-green-500" : "text-amber-500"}`}>{isCorrect ? "🎉 Correct!" : `${question.labelA} = ${question.valueA}, ${question.labelB} = ${question.valueB} → ${question.answer}`}</p></div>}
+        {selected !== null && <div className="mt-4 text-center"><p className={`text-xl font-extrabold sm:text-2xl ${isCorrect ? "text-green-500" : "text-amber-500"}`}>{isCorrect ? "🎉 Correct!" : "Have another try!"}</p></div>}
       </div>
     </GameWrapper>
   );
@@ -1013,6 +1145,7 @@ function PhonicsGame({ onComplete, onBack, difficulty }: { onComplete: (score: n
   const [score, setScore] = useState(0);
   const [selected, setSelected] = useState<string | null>(null);
   const [isCorrect, setIsCorrect] = useState<boolean | null>(null);
+  const { showRetry, clearRetry } = useGameRetry();
   const question = questions[current];
 
   function handleSelect(option: string) {
@@ -1021,8 +1154,12 @@ function PhonicsGame({ onComplete, onBack, difficulty }: { onComplete: (score: n
     const correct = option === question.answer;
     setIsCorrect(correct);
     if (correct) {
+      clearRetry();
       setScore((s) => s + 1);
       fireConfetti();
+    } else {
+      showRetry(question.hint, () => { setSelected(null); setIsCorrect(null); clearRetry(); });
+      return;
     }
     setTimeout(() => {
       if (current + 1 >= TOTAL) onComplete(score + (correct ? 1 : 0), TOTAL);
@@ -1043,14 +1180,14 @@ function PhonicsGame({ onComplete, onBack, difficulty }: { onComplete: (score: n
           {question.choices.map((choice) => {
             let btnStyle = "bg-gradient-to-br from-lime-50 to-green-50 border-lime-300 text-green-700 hover:from-lime-100 hover:to-green-100";
             if (selected) {
-              if (choice.label === question.answer) btnStyle = "bg-green-100 border-green-400 text-green-700 scale-[1.02]";
-              else if (choice.label === selected && !isCorrect) btnStyle = "bg-red-100 border-red-300 text-red-500 animate-[shake_0.4s_ease-in-out]";
-              else btnStyle = "bg-gray-50 border-gray-200 text-gray-400";
+              if (isCorrect && choice.label === question.answer) btnStyle = "bg-green-100 border-green-400 text-green-700 scale-[1.02]";
+              else if (!isCorrect && choice.label === selected) btnStyle = "bg-red-100 border-red-300 text-red-500 animate-[shake_0.4s_ease-in-out]";
+              else if (isCorrect) btnStyle = "bg-gray-50 border-gray-200 text-gray-400";
             }
             return <button key={choice.label} onClick={() => handleSelect(choice.label)} disabled={!!selected} className={`flex w-full items-center gap-4 rounded-2xl border-2 p-4 text-left transition-all duration-200 cursor-pointer ${btnStyle}`}><span className="text-4xl">{choice.emoji}</span><span className="text-2xl font-extrabold">{choice.label}</span></button>;
           })}
         </div>
-        {selected && <div className="mt-4 text-center"><p className={`text-2xl font-extrabold ${isCorrect ? "text-green-500" : "text-lime-500"}`}>{isCorrect ? "🎉 Nice reading!" : `The answer is ${question.answer}.`}</p><p className="mt-1 text-sm font-semibold text-green-300">{question.hint}</p></div>}
+        {selected && <div className="mt-4 text-center"><p className={`text-2xl font-extrabold ${isCorrect ? "text-green-500" : "text-lime-500"}`}>{isCorrect ? "🎉 Nice reading!" : "Say it slowly and try again!"}</p><p className="mt-1 text-sm font-semibold text-green-300">{isCorrect ? question.hint : "Listen for the beginning or ending sound."}</p></div>}
       </div>
     </GameWrapper>
   );
@@ -1424,6 +1561,7 @@ function NumberTrainGame({ onComplete, onBack, difficulty }: GameProps) {
   const [score, setScore] = useState(0);
   const [placed, setPlaced] = useState<number[]>([]);
   const [isCorrect, setIsCorrect] = useState<boolean | null>(null);
+  const { showRetry, clearRetry } = useGameRetry();
   const round = rounds[current];
   const available = round.numbers.filter((number) => !placed.includes(number));
 
@@ -1446,8 +1584,12 @@ function NumberTrainGame({ onComplete, onBack, difficulty }: GameProps) {
       const correct = nextPlaced.every((value, index) => value === round.answer[index]);
       setIsCorrect(correct);
       if (correct) {
+        clearRetry();
         setScore((value) => value + 1);
         fireConfetti();
+      } else {
+        showRetry("Find the smallest number first, then count up. Try the train again!", () => { setPlaced([]); setIsCorrect(null); clearRetry(); });
+        return;
       }
       advance(correct);
     }
@@ -1475,7 +1617,7 @@ function NumberTrainGame({ onComplete, onBack, difficulty }: GameProps) {
             </button>
           ))}
         </div>
-        {isCorrect !== null && <p className={`mt-5 text-center text-2xl font-extrabold ${isCorrect ? "text-green-500" : "text-blue-500"}`}>{isCorrect ? "🎉 Train is ready!" : `Order: ${round.answer.join(", ")}`}</p>}
+        {isCorrect !== null && <p className={`mt-5 text-center text-2xl font-extrabold ${isCorrect ? "text-green-500" : "text-blue-500"}`}>{isCorrect ? "🎉 Train is ready!" : "Have another try!"}</p>}
       </div>
     </GameWrapper>
   );
@@ -1532,6 +1674,7 @@ function WordBuilderGame({ onComplete, onBack, difficulty }: GameProps) {
   const [score, setScore] = useState(0);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [isCorrect, setIsCorrect] = useState<boolean | null>(null);
+  const { showRetry, clearRetry } = useGameRetry();
   const round = rounds[current];
   const selectedLetters = selectedIds.map((id) => round.tiles.find((tile) => tile.id === id)?.letter ?? "");
 
@@ -1540,8 +1683,12 @@ function WordBuilderGame({ onComplete, onBack, difficulty }: GameProps) {
     const correct = word === round.word;
     setIsCorrect(correct);
     if (correct) {
+      clearRetry();
       setScore((value) => value + 1);
       fireConfetti();
+    } else {
+      showRetry("Say the word slowly and listen for its first sound. Try the letters again!", () => { setSelectedIds([]); setIsCorrect(null); clearRetry(); });
+      return;
     }
     setTimeout(() => {
       if (current + 1 >= TOTAL) onComplete(score + (correct ? 1 : 0), TOTAL);
@@ -1582,7 +1729,7 @@ function WordBuilderGame({ onComplete, onBack, difficulty }: GameProps) {
             </button>
           ))}
         </div>
-        {isCorrect !== null && <p className={`mt-5 text-center text-2xl font-extrabold ${isCorrect ? "text-green-500" : "text-emerald-500"}`}>{isCorrect ? "🎉 You built it!" : `It spells ${round.word}.`}</p>}
+        {isCorrect !== null && <p className={`mt-5 text-center text-2xl font-extrabold ${isCorrect ? "text-green-500" : "text-emerald-500"}`}>{isCorrect ? "🎉 You built it!" : "Have another try!"}</p>}
       </div>
     </GameWrapper>
   );
@@ -1635,6 +1782,7 @@ function ShapeBuilderGame({ onComplete, onBack, difficulty }: GameProps) {
   const [score, setScore] = useState(0);
   const [selected, setSelected] = useState<string[]>([]);
   const [isCorrect, setIsCorrect] = useState<boolean | null>(null);
+  const { showRetry, clearRetry } = useGameRetry();
   const round = rounds[current];
 
   function handleShape(shape: string) {
@@ -1645,8 +1793,12 @@ function ShapeBuilderGame({ onComplete, onBack, difficulty }: GameProps) {
       const correct = round.pieces.every((piece) => nextSelected.includes(piece));
       setIsCorrect(correct);
       if (correct) {
+        clearRetry();
         setScore((value) => value + 1);
         fireConfetti();
+      } else {
+        showRetry("Look at the picture and choose only the shapes it needs. Try again!", () => { setSelected([]); setIsCorrect(null); clearRetry(); });
+        return;
       }
       setTimeout(() => {
         if (current + 1 >= TOTAL) onComplete(score + (correct ? 1 : 0), TOTAL);
@@ -1682,7 +1834,7 @@ function ShapeBuilderGame({ onComplete, onBack, difficulty }: GameProps) {
             </button>
           ))}
         </div>
-        {isCorrect !== null && <p className={`mt-5 text-center text-2xl font-extrabold ${isCorrect ? "text-green-500" : "text-teal-500"}`}>{isCorrect ? "🎉 Picture built!" : `Use ${round.pieces.join(", ")}.`}</p>}
+        {isCorrect !== null && <p className={`mt-5 text-center text-2xl font-extrabold ${isCorrect ? "text-green-500" : "text-teal-500"}`}>{isCorrect ? "🎉 Picture built!" : "Have another try!"}</p>}
       </div>
     </GameWrapper>
   );
@@ -1734,6 +1886,7 @@ function TreasureSortGame({ onComplete, onBack, difficulty }: GameProps) {
   const [score, setScore] = useState(0);
   const [selected, setSelected] = useState<string | null>(null);
   const [isCorrect, setIsCorrect] = useState<boolean | null>(null);
+  const { showRetry, clearRetry } = useGameRetry();
   const round = rounds[current];
   const ruleLabel = round.rule === "first" ? "first letter" : round.rule;
 
@@ -1743,8 +1896,12 @@ function TreasureSortGame({ onComplete, onBack, difficulty }: GameProps) {
     const correct = bin === round.answer;
     setIsCorrect(correct);
     if (correct) {
+      clearRetry();
       setScore((value) => value + 1);
       fireConfetti();
+    } else {
+      showRetry("Look at the sorting rule above the bins. Try again!", () => { setSelected(null); setIsCorrect(null); clearRetry(); });
+      return;
     }
     setTimeout(() => {
       if (current + 1 >= TOTAL) onComplete(score + (correct ? 1 : 0), TOTAL);
@@ -1768,14 +1925,14 @@ function TreasureSortGame({ onComplete, onBack, difficulty }: GameProps) {
           {round.bins.map((bin) => {
             let style = "border-amber-300 bg-amber-50 text-amber-700 hover:scale-[1.03]";
             if (selected) {
-              if (bin === round.answer) style = "border-green-400 bg-green-100 text-green-700 scale-[1.03]";
-              else if (bin === selected && !isCorrect) style = "border-red-300 bg-red-100 text-red-500 animate-[shake_0.4s_ease-in-out]";
-              else style = "border-gray-200 bg-gray-100 text-gray-400";
+              if (isCorrect && bin === round.answer) style = "border-green-400 bg-green-100 text-green-700 scale-[1.03]";
+              else if (!isCorrect && bin === selected) style = "border-red-300 bg-red-100 text-red-500 animate-[shake_0.4s_ease-in-out]";
+              else if (isCorrect) style = "border-gray-200 bg-gray-100 text-gray-400";
             }
             return <button key={bin} onClick={() => handleBin(bin)} disabled={!!selected} className={`rounded-2xl border-4 p-5 text-xl font-extrabold shadow-md transition-transform cursor-pointer ${style}`}>{bin}</button>;
           })}
         </div>
-        {selected && <p className={`mt-5 text-center text-2xl font-extrabold ${isCorrect ? "text-green-500" : "text-orange-500"}`}>{isCorrect ? "🎉 Sorted!" : `It goes in ${round.answer}.`}</p>}
+        {selected && <p className={`mt-5 text-center text-2xl font-extrabold ${isCorrect ? "text-green-500" : "text-orange-500"}`}>{isCorrect ? "🎉 Sorted!" : "Have another try!"}</p>}
       </div>
     </GameWrapper>
   );
@@ -1812,6 +1969,7 @@ function MathRaceGame({ onComplete, onBack, difficulty }: GameProps) {
   const [score, setScore] = useState(0);
   const [selected, setSelected] = useState<number | null>(null);
   const [isCorrect, setIsCorrect] = useState<boolean | null>(null);
+  const { showRetry, clearRetry } = useGameRetry();
   const round = rounds[current];
 
   function handleAnswer(option: number) {
@@ -1820,8 +1978,12 @@ function MathRaceGame({ onComplete, onBack, difficulty }: GameProps) {
     const correct = option === round.answer;
     setIsCorrect(correct);
     if (correct) {
+      clearRetry();
       setScore((value) => value + 1);
       fireConfetti();
+    } else {
+      showRetry("Use your fingers to count the two numbers. Try the race again!", () => { setSelected(null); setIsCorrect(null); clearRetry(); });
+      return;
     }
     setTimeout(() => {
       if (current + 1 >= TOTAL) onComplete(score + (correct ? 1 : 0), TOTAL);
@@ -1851,14 +2013,14 @@ function MathRaceGame({ onComplete, onBack, difficulty }: GameProps) {
           {round.options.map((option) => {
             let style = "border-orange-300 bg-orange-50 text-orange-700 hover:scale-[1.04]";
             if (selected !== null) {
-              if (option === round.answer) style = "border-green-400 bg-green-100 text-green-700 scale-110";
-              else if (option === selected && !isCorrect) style = "border-red-300 bg-red-100 text-red-500 animate-[shake_0.4s_ease-in-out]";
-              else style = "border-gray-200 bg-gray-100 text-gray-400";
+              if (isCorrect && option === round.answer) style = "border-green-400 bg-green-100 text-green-700 scale-110";
+              else if (!isCorrect && option === selected) style = "border-red-300 bg-red-100 text-red-500 animate-[shake_0.4s_ease-in-out]";
+              else if (isCorrect) style = "border-gray-200 bg-gray-100 text-gray-400";
             }
             return <button key={option} onClick={() => handleAnswer(option)} disabled={selected !== null} className={`flex h-20 w-20 items-center justify-center rounded-2xl border-4 text-4xl font-black shadow-md transition-transform cursor-pointer sm:h-24 sm:w-24 ${style}`}>{option}</button>;
           })}
         </div>
-        {selected !== null && <p className={`mt-5 text-center text-2xl font-extrabold ${isCorrect ? "text-green-500" : "text-red-500"}`}>{isCorrect ? "🎉 Zoom!" : `${round.expression} = ${round.answer}`}</p>}
+        {selected !== null && <p className={`mt-5 text-center text-2xl font-extrabold ${isCorrect ? "text-green-500" : "text-red-500"}`}>{isCorrect ? "🎉 Zoom!" : "Have another try!"}</p>}
       </div>
     </GameWrapper>
   );
@@ -1896,6 +2058,7 @@ function OddOneOutGame({ onComplete, onBack, difficulty }: GameProps) {
   const [score, setScore] = useState(0);
   const [selected, setSelected] = useState<string | null>(null);
   const [isCorrect, setIsCorrect] = useState<boolean | null>(null);
+  const { showRetry, clearRetry } = useGameRetry();
   const round = rounds[current];
 
   function handleChoice(label: string) {
@@ -1904,8 +2067,12 @@ function OddOneOutGame({ onComplete, onBack, difficulty }: GameProps) {
     const correct = label === round.answer;
     setIsCorrect(correct);
     if (correct) {
+      clearRetry();
       setScore((value) => value + 1);
       fireConfetti();
+    } else {
+      showRetry("Look for the picture that is different from the others.", () => { setSelected(null); setIsCorrect(null); clearRetry(); });
+      return;
     }
     setTimeout(() => {
       if (current + 1 >= TOTAL) onComplete(score + (correct ? 1 : 0), TOTAL);
@@ -1925,9 +2092,9 @@ function OddOneOutGame({ onComplete, onBack, difficulty }: GameProps) {
           {round.choices.map((choice) => {
             let style = "border-violet-300 bg-violet-50 text-violet-700 hover:scale-[1.03]";
             if (selected) {
-              if (choice.label === round.answer) style = "border-green-400 bg-green-100 text-green-700 scale-[1.03]";
-              else if (choice.label === selected && !isCorrect) style = "border-red-300 bg-red-100 text-red-500 animate-[shake_0.4s_ease-in-out]";
-              else style = "border-gray-200 bg-gray-100 text-gray-400";
+              if (isCorrect && choice.label === round.answer) style = "border-green-400 bg-green-100 text-green-700 scale-[1.03]";
+              else if (!isCorrect && choice.label === selected) style = "border-red-300 bg-red-100 text-red-500 animate-[shake_0.4s_ease-in-out]";
+              else if (isCorrect) style = "border-gray-200 bg-gray-100 text-gray-400";
             }
             return (
               <button key={choice.label} onClick={() => handleChoice(choice.label)} disabled={!!selected} className={`rounded-2xl border-4 p-4 text-center shadow-md transition-transform cursor-pointer ${style}`}>
@@ -1937,7 +2104,7 @@ function OddOneOutGame({ onComplete, onBack, difficulty }: GameProps) {
             );
           })}
         </div>
-        {selected && <p className={`mt-5 text-center text-xl font-extrabold sm:text-2xl ${isCorrect ? "text-green-500" : "text-violet-500"}`}>{isCorrect ? "🎉 You found it!" : round.reason}</p>}
+        {selected && <p className={`mt-5 text-center text-xl font-extrabold sm:text-2xl ${isCorrect ? "text-green-500" : "text-violet-500"}`}>{isCorrect ? "🎉 You found it!" : "Have another try!"}</p>}
       </div>
     </GameWrapper>
   );
@@ -1981,6 +2148,7 @@ function StorySequencerGame({ onComplete, onBack, difficulty }: GameProps) {
   const [choices, setChoices] = useState<StoryStep[]>(() => shuffle(rounds[0].steps));
   const [selected, setSelected] = useState<StoryStep[]>([]);
   const [isCorrect, setIsCorrect] = useState<boolean | null>(null);
+  const { showRetry, clearRetry } = useGameRetry();
   const round = rounds[current];
 
   function goNext(correct: boolean) {
@@ -2004,8 +2172,12 @@ function StorySequencerGame({ onComplete, onBack, difficulty }: GameProps) {
       const correct = nextSelected.every((item, index) => item.label === round.steps[index].label);
       setIsCorrect(correct);
       if (correct) {
+        clearRetry();
         setScore((value) => value + 1);
         fireConfetti();
+      } else {
+        showRetry("Think about what happens first, next, and last. Try the story again!", () => { setSelected([]); setIsCorrect(null); clearRetry(); });
+        return;
       }
       goNext(correct);
     }
@@ -2037,7 +2209,96 @@ function StorySequencerGame({ onComplete, onBack, difficulty }: GameProps) {
             );
           })}
         </div>
-        {isCorrect !== null && <p className={`mt-5 text-center text-xl font-extrabold sm:text-2xl ${isCorrect ? "text-green-500" : "text-sky-600"}`}>{isCorrect ? "🎉 Great story!" : `Order: ${round.steps.map((step) => step.label).join(" → ")}`}</p>}
+        {isCorrect !== null && <p className={`mt-5 text-center text-xl font-extrabold sm:text-2xl ${isCorrect ? "text-green-500" : "text-sky-600"}`}>{isCorrect ? "🎉 Great story!" : "Have another try!"}</p>}
+      </div>
+    </GameWrapper>
+  );
+}
+
+// ============ TRACE & DRAW ============
+
+type TraceRound = { name: string; emoji: string; points: { x: number; y: number }[] };
+
+const traceRounds: TraceRound[] = [
+  { name: "Circle", emoji: "⚪", points: Array.from({ length: 16 }, (_, index) => { const angle = (Math.PI * 2 * index) / 16 - Math.PI / 2; return { x: 150 + Math.cos(angle) * 92, y: 150 + Math.sin(angle) * 92 }; }) },
+  { name: "Triangle", emoji: "🔺", points: [{ x: 150, y: 45 }, { x: 245, y: 245 }, { x: 55, y: 245 }, { x: 150, y: 45 }] },
+  { name: "Square", emoji: "🟦", points: [{ x: 65, y: 65 }, { x: 235, y: 65 }, { x: 235, y: 235 }, { x: 65, y: 235 }, { x: 65, y: 65 }] },
+  { name: "Star", emoji: "⭐", points: Array.from({ length: 11 }, (_, index) => { const angle = (Math.PI * 2 * index) / 10 - Math.PI / 2; const radius = index % 2 === 0 ? 100 : 42; return { x: 150 + Math.cos(angle) * radius, y: 150 + Math.sin(angle) * radius }; }) },
+];
+
+function TraceGame({ onComplete, onBack, difficulty }: GameProps) {
+  const TOTAL = traceRounds.length;
+  const [current, setCurrent] = useState(0);
+  const [score, setScore] = useState(0);
+  const [trail, setTrail] = useState<{ x: number; y: number }[]>([]);
+  const [visited, setVisited] = useState<number[]>([]);
+  const [drawing, setDrawing] = useState(false);
+  const [isCorrect, setIsCorrect] = useState<boolean | null>(null);
+  const { showRetry, clearRetry } = useGameRetry();
+  const round = traceRounds[current];
+
+  function pointFromEvent(event: React.PointerEvent<SVGSVGElement>) {
+    const rect = event.currentTarget.getBoundingClientRect();
+    return { x: ((event.clientX - rect.left) / rect.width) * 300, y: ((event.clientY - rect.top) / rect.height) * 300 };
+  }
+
+  function recordPoint(point: { x: number; y: number }) {
+    if (isCorrect !== null) return;
+    setTrail((value) => [...value, point]);
+    const closest = round.points.reduce((best, target, index) => {
+      const distance = Math.hypot(point.x - target.x, point.y - target.y);
+      return distance < best.distance ? { distance, index } : best;
+    }, { distance: Infinity, index: -1 });
+    if (closest.distance < 28 && !visited.includes(closest.index)) setVisited((value) => [...value, closest.index]);
+  }
+
+  function addPoint(event: React.PointerEvent<SVGSVGElement>) {
+    if (!drawing || isCorrect !== null) return;
+    recordPoint(pointFromEvent(event));
+  }
+
+  function startTrace(event: React.PointerEvent<SVGSVGElement>) {
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setDrawing(true);
+    setTrail([]);
+    setVisited([]);
+    recordPoint(pointFromEvent(event));
+  }
+
+  function finishTrace() {
+    if (!drawing || isCorrect !== null) return;
+    setDrawing(false);
+    const complete = visited.length >= Math.ceil(round.points.length * 0.65);
+    setIsCorrect(complete);
+    if (complete) {
+      clearRetry();
+      setScore((value) => value + 1);
+      fireConfetti();
+      setTimeout(() => {
+        if (current + 1 >= TOTAL) onComplete(score + 1, TOTAL);
+        else { setCurrent((value) => value + 1); setTrail([]); setVisited([]); setIsCorrect(null); }
+      }, 1200);
+    } else {
+      showRetry("Follow the glowing dots around the shape. You can try again!", () => { setTrail([]); setVisited([]); setIsCorrect(null); clearRetry(); });
+    }
+  }
+
+  return (
+    <GameWrapper title="Trace & Draw" emoji="✏️" current={current} total={TOTAL} score={score} onBack={onBack} bgGradient="bg-gradient-to-br from-yellow-50 via-orange-50 to-pink-100" difficulty={difficulty}>
+      <div className="w-full rounded-3xl bg-white p-5 shadow-2xl sm:p-7">
+        <div className="mb-4 text-center">
+          <div className="text-7xl">{round.emoji}</div>
+          <h2 className="mt-2 text-2xl font-extrabold text-orange-600 sm:text-3xl">Trace a {round.name}</h2>
+          <p className="mt-1 text-sm font-semibold text-orange-300">Drag your finger from dot to dot.</p>
+        </div>
+        <svg viewBox="0 0 300 300" className="mx-auto mb-5 w-full max-w-[320px] rounded-3xl border-4 border-orange-200 bg-orange-50 shadow-inner" style={{ touchAction: "none" }} onPointerDown={startTrace} onPointerMove={addPoint} onPointerUp={finishTrace} onPointerCancel={finishTrace} aria-label={`Trace a ${round.name}`}>
+          <polyline points={round.points.map((point) => `${point.x},${point.y}`).join(" ")} fill="none" stroke="#FDBA74" strokeWidth="12" strokeLinecap="round" strokeLinejoin="round" strokeDasharray="3 13" />
+          {round.points.map((point, index) => <circle key={index} cx={point.x} cy={point.y} r={visited.includes(index) ? 10 : 6} fill={visited.includes(index) ? "#22C55E" : "#F97316"} opacity={visited.includes(index) ? 1 : 0.8} />)}
+          {trail.length > 1 && <polyline points={trail.map((point) => `${point.x},${point.y}`).join(" ")} fill="none" stroke="#8B5CF6" strokeWidth="7" strokeLinecap="round" strokeLinejoin="round" opacity="0.8" />}
+        </svg>
+        <p className={`text-center text-xl font-extrabold ${isCorrect === true ? "text-green-500" : isCorrect === false ? "text-orange-500" : "text-orange-400"}`} aria-live="polite">
+          {isCorrect === true ? "🎉 Beautiful tracing!" : isCorrect === false ? "Almost there!" : "Start at any dot and follow the path."}
+        </p>
       </div>
     </GameWrapper>
   );
@@ -2051,7 +2312,7 @@ const gameRegistry: GameRegistryEntry[] = [
   { key: "pattern", emoji: "🧩", title: "Pattern Fun", subtitle: "AB, AAB, ABC, and more", gradient: "from-indigo-400 to-violet-500", bg: "bg-indigo-50", total: () => 8, component: PatternGame, achievement: { id: "pattern-detective", label: "Pattern Detective", emoji: "🧩" } },
   { key: "compare", emoji: "📏", title: "Compare Numbers", subtitle: "Greater, less, equal, and ordering", gradient: "from-amber-400 to-yellow-500", bg: "bg-amber-50", total: () => 8, component: CompareGame, achievement: { id: "compare-captain", label: "Compare Captain", emoji: "📏" } },
   { key: "phonics", emoji: "📚", title: "Phonics Fun", subtitle: "Beginning sounds and rhymes", gradient: "from-lime-400 to-green-500", bg: "bg-lime-50", total: (difficulty) => difficulty === "hard" ? 10 : 8, component: PhonicsGame, achievement: { id: "reading-rockstar", label: "Reading Rockstar", emoji: "📚" } },
-  { key: "bubbles", emoji: "🫧", title: "Bubble Pop", subtitle: "Pop the letter bubbles!", gradient: "from-sky-400 to-blue-500", bg: "bg-sky-50", total: () => 8, component: BubblePopGame, achievement: { id: "bubble-master", label: "Bubble Master", emoji: "🫧" } },
+  { key: "bubbles", emoji: "🫧", title: "Bubble Pop", subtitle: "Pop the letter bubbles!", gradient: "from-sky-400 to-blue-500", bg: "bg-sky-50", total: getBubbleTargetCount, component: BubblePopGame, achievement: { id: "bubble-master", label: "Bubble Master", emoji: "🫧" } },
   { key: "memory", emoji: "🧠", title: "Memory Match", subtitle: "Flip cards and find pairs", gradient: "from-fuchsia-400 to-pink-500", bg: "bg-fuchsia-50", total: getMemoryPairCount, component: MemoryMatchGame, achievement: { id: "memory-champion", label: "Memory Champion", emoji: "🧠" } },
   { key: "train", emoji: "🚂", title: "Number Train", subtitle: "Put number cars in order", gradient: "from-cyan-400 to-blue-500", bg: "bg-cyan-50", total: () => 8, component: NumberTrainGame, achievement: { id: "train-conductor", label: "Train Conductor", emoji: "🚂" } },
   { key: "words", emoji: "🔤", title: "Word Builder", subtitle: "Tap letters to spell words", gradient: "from-emerald-400 to-lime-500", bg: "bg-emerald-50", total: getWordRoundTotal, component: WordBuilderGame, achievement: { id: "word-builder", label: "Word Builder", emoji: "🔤" } },
@@ -2060,6 +2321,7 @@ const gameRegistry: GameRegistryEntry[] = [
   { key: "race", emoji: "🏎️", title: "Math Race", subtitle: "Solve to move the racer", gradient: "from-red-400 to-orange-500", bg: "bg-red-50", total: () => 8, component: MathRaceGame, achievement: { id: "math-racer", label: "Math Racer", emoji: "🏎️" } },
   { key: "oddone", emoji: "🧐", title: "Odd One Out", subtitle: "Find what does not belong", gradient: "from-violet-400 to-purple-500", bg: "bg-violet-50", total: () => 8, component: OddOneOutGame, achievement: { id: "category-detective", label: "Category Detective", emoji: "🧐" } },
   { key: "story", emoji: "📖", title: "Story Sequencer", subtitle: "Put picture stories in order", gradient: "from-sky-400 to-indigo-500", bg: "bg-sky-50", total: () => 8, component: StorySequencerGame, achievement: { id: "storyteller", label: "Storyteller", emoji: "📖" } },
+  { key: "trace", emoji: "✏️", title: "Trace & Draw", subtitle: "Trace shapes with your finger", gradient: "from-orange-400 to-pink-500", bg: "bg-orange-50", total: () => traceRounds.length, component: TraceGame, achievement: { id: "tracing-artist", label: "Tracing Artist", emoji: "✏️" } },
 ];
 
 const playableModes = gameRegistry.map((game) => game.key);

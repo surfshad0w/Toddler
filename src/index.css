@@ -38,6 +38,17 @@ button {
   user-select: none;
 }
 
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
 @keyframes bubbleFloat {
   0%, 100% { transform: translateY(0px) rotate(0deg); }
   25% { transform: translateY(-12px) rotate(3deg); }
