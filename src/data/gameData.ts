@@ -136,33 +136,61 @@ export interface PatternQuestion {
   options: string[];
 }
 
-export function generatePatternQuestions(): PatternQuestion[] {
-  const patternSets: { items: string[]; repeat: number }[] = [
-    { items: ["🔴", "🔵"], repeat: 2 },
-    { items: ["🌟", "🌙"], repeat: 2 },
-    { items: ["🍎", "🍌"], repeat: 2 },
-    { items: ["🐱", "🐶"], repeat: 2 },
-    { items: ["🌸", "🌻"], repeat: 2 },
-    { items: ["❤️", "💙"], repeat: 2 },
-    { items: ["🟢", "🟡"], repeat: 2 },
-    { items: ["🦋", "🐛"], repeat: 2 },
-    { items: ["🍕", "🍔"], repeat: 2 },
-    { items: ["🎈", "🎁"], repeat: 2 },
-    { items: ["🔴", "🔵", "🟢"], repeat: 1 },
-    { items: ["🍎", "🍊", "🍌"], repeat: 1 },
-    { items: ["⭐", "🌙", "☀️"], repeat: 1 },
-    { items: ["🐶", "🐱", "🐰"], repeat: 1 },
-    { items: ["❤️", "💛", "💙"], repeat: 1 },
-    { items: ["🌸", "🌼", "🌻"], repeat: 1 },
-  ];
+type PatternLevel = "medium" | "hard";
+
+type PatternSet = {
+  items: string[];
+  repeats: number;
+};
+
+const mediumPatternSets: PatternSet[] = [
+  { items: ["🔴", "🔵"], repeats: 3 },
+  { items: ["🌟", "🌙"], repeats: 3 },
+  { items: ["🍎", "🍌"], repeats: 3 },
+  { items: ["🐱", "🐶"], repeats: 3 },
+  { items: ["🌸", "🌻", "🌼"], repeats: 2 },
+  { items: ["❤️", "💛", "💙"], repeats: 2 },
+  { items: ["🟢", "🟡", "🔵"], repeats: 2 },
+  { items: ["🦋", "🐛", "🐝"], repeats: 2 },
+  { items: ["🍕", "🍔", "🌭"], repeats: 2 },
+  { items: ["🎈", "🎁", "🎀"], repeats: 2 },
+  { items: ["🔴", "🔴", "🔵"], repeats: 3 },
+  { items: ["🌟", "🌙", "🌙"], repeats: 3 },
+  { items: ["🍎", "🍌", "🍊", "🍌"], repeats: 2 },
+  { items: ["🐱", "🐶", "🐰", "🐶"], repeats: 2 },
+  { items: ["🌸", "🌸", "🌻", "🌼"], repeats: 2 },
+  { items: ["❤️", "💙", "💙", "💛"], repeats: 2 },
+];
+
+const hardPatternSets: PatternSet[] = [
+  // The repeated unit is no longer just an alternating AB pattern.
+  { items: ["🔴", "🔴", "🔵"], repeats: 3 },
+  { items: ["🌟", "🌙", "🌙"], repeats: 3 },
+  { items: ["🍎", "🍌", "🍌"], repeats: 3 },
+  { items: ["🐱", "🐶", "🐱"], repeats: 3 },
+  { items: ["🌸", "🌻", "🌼", "🌻"], repeats: 2 },
+  { items: ["❤️", "💛", "💙", "💛"], repeats: 2 },
+  { items: ["🟢", "🟢", "🟡", "🔵"], repeats: 2 },
+  { items: ["🦋", "🐛", "🐝", "🐛"], repeats: 2 },
+  { items: ["🍕", "🍕", "🍔", "🌭"], repeats: 2 },
+  { items: ["🎈", "🎁", "🎈", "🎀"], repeats: 2 },
+  { items: ["🔴", "🔵", "🟢", "🟡"], repeats: 2 },
+  { items: ["🍎", "🍎", "🍊", "🍌"], repeats: 2 },
+  { items: ["⭐", "🌙", "☀️", "🌈"], repeats: 2 },
+  { items: ["🐶", "🐱", "🐰", "🐭"], repeats: 2 },
+  { items: ["🌸", "🌸", "🌼", "🌻", "🌻"], repeats: 2 },
+  { items: ["❤️", "💙", "💙", "💛", "💛"], repeats: 2 },
+];
+
+export function generatePatternQuestions(level: PatternLevel = "medium"): PatternQuestion[] {
+  const patternSets = level === "hard" ? hardPatternSets : mediumPatternSets;
 
   const selected = shuffle(patternSets).slice(0, 12);
   const questions: PatternQuestion[] = [];
 
   for (const ps of selected) {
     const fullPattern: string[] = [];
-    const totalRepeats = ps.items.length === 2 ? 3 : 2;
-    for (let r = 0; r < totalRepeats; r++) {
+    for (let r = 0; r < ps.repeats; r++) {
       for (const item of ps.items) {
         fullPattern.push(item);
       }
@@ -171,9 +199,12 @@ export function generatePatternQuestions(): PatternQuestion[] {
     const answer = fullPattern[fullPattern.length - 1];
     const shown = fullPattern.slice(0, fullPattern.length - 1);
 
-    // Generate wrong options from other emojis
-    const allEmojis = ["🔴", "🔵", "🟢", "🟡", "🍎", "🍌", "🍊", "🌟", "🌙", "☀️", "🐱", "🐶", "🐰", "🌸", "🌻", "🌼", "❤️", "💙", "💛", "🦋", "🐛", "🍕", "🍔", "🎈", "🎁"];
-    const wrongOptions = shuffle(allEmojis.filter((e) => e !== answer && !ps.items.includes(e))).slice(0, 2);
+    // Include items from the pattern among the distractors so the answer cannot
+    // be found simply by choosing the only emoji that appears in the sequence.
+    const allEmojis = ["🔴", "🔵", "🟢", "🟡", "🟣", "🍎", "🍌", "🍊", "🌟", "🌙", "☀️", "🌈", "🐱", "🐶", "🐰", "🐭", "🌸", "🌻", "🌼", "❤️", "💙", "💛", "🦋", "🐛", "🐝", "🍕", "🍔", "🌭", "🎈", "🎁", "🎀"];
+    const patternDistractors = shuffle(Array.from(new Set(ps.items.filter((e) => e !== answer))));
+    const unrelatedDistractors = shuffle(allEmojis.filter((e) => !ps.items.includes(e)));
+    const wrongOptions = [...patternDistractors, ...unrelatedDistractors].slice(0, 2);
     const options = shuffle([answer, ...wrongOptions]);
 
     questions.push({ pattern: shown, answer, options });

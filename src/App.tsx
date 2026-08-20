@@ -970,7 +970,6 @@ function MathGame({ onComplete, onBack, difficulty }: { onComplete: (score: numb
 }
 
 function buildPatternQuestions(difficulty: Difficulty) {
-  const all = generatePatternQuestions();
   const easyPatterns: PatternQuestion[] = [
     { pattern: ["🔴", "🔵", "🔴"], answer: "🔵", options: ["🔵", "🔴", "🟢"] },
     { pattern: ["⭐", "🌙", "⭐"], answer: "🌙", options: ["🌙", "⭐", "☀️"] },
@@ -982,12 +981,7 @@ function buildPatternQuestions(difficulty: Difficulty) {
     { pattern: ["🦋", "🐛", "🦋"], answer: "🐛", options: ["🐛", "🦋", "🐝"] },
   ];
   if (difficulty === "easy") return shuffle(easyPatterns);
-  if (difficulty === "medium") return all;
-  return shuffle([...all, ...([
-    { pattern: ["🔴", "🔴", "🔵", "🔴", "🔴"], answer: "🔵", options: ["🔵", "🟢", "🟡"] },
-    { pattern: ["⭐", "🌙", "☀️", "⭐", "🌙"], answer: "☀️", options: ["☀️", "⭐", "🌙"] },
-    { pattern: ["🟩", "🟨", "🟩", "🟨", "🟩"], answer: "🟨", options: ["🟨", "🟩", "🟥"] },
-  ] satisfies PatternQuestion[])]);
+  return generatePatternQuestions(difficulty === "hard" ? "hard" : "medium");
 }
 
 function PatternGame({ onComplete, onBack, difficulty }: { onComplete: (score: number, total: number) => void; onBack: () => void; difficulty: Difficulty }) {
